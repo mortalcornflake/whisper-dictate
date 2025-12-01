@@ -34,8 +34,9 @@ SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 
 # Audio input device - set to None for system default, or device name/index
-# Use "MacBook Pro Microphone" to always use built-in mic even with AirPods connected
-INPUT_DEVICE = "MacBook Pro Microphone"
+# Examples: "MacBook Pro Microphone", "iMac Microphone", "USB Microphone"
+# Tip: Use a specific mic name to dictate through built-in mic while using AirPods for audio
+INPUT_DEVICE = os.environ.get("INPUT_DEVICE", None)  # None = system default
 
 # Transcription backend: "groq", "openai", or "local"
 BACKEND = os.environ.get("DICTATE_BACKEND", "groq")
