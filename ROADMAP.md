@@ -76,6 +76,45 @@ Raw transcription includes filler words (um, uh, like, you know), false starts, 
 
 ## Other Future Ideas
 
+### Clipboard Preservation
+Save clipboard contents before pasting, restore after:
+```python
+import subprocess
+
+def get_clipboard():
+    return subprocess.run(['pbpaste'], capture_output=True, text=True).stdout
+
+def set_clipboard(text):
+    subprocess.run(['pbcopy'], input=text.encode(), check=True)
+
+# In paste_text():
+old_clipboard = get_clipboard()
+pyperclip.copy(text)
+# ... paste ...
+set_clipboard(old_clipboard)  # Restore
+```
+
+### Configurable Hotkey via .env
+Allow hotkey configuration without editing code:
+```bash
+# .env
+HOTKEY=alt_r        # Right Option (default)
+HOTKEY=ctrl_r       # Right Control
+HOTKEY=f6           # F6
+```
+
+### Language Selection
+Whisper supports 99 languages. Add language hint for better accuracy:
+```bash
+# .env
+WHISPER_LANGUAGE=en  # or es, fr, de, ja, etc.
+```
+
+Pass to API:
+```python
+data={"model": "whisper-large-v3", "language": WHISPER_LANGUAGE}
+```
+
 ### Context-Aware Formatting
 Detect active app and adjust output:
 - **Slack/Discord**: casual, lowercase
