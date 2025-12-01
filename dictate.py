@@ -44,14 +44,14 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # Local whisper.cpp fallback settings
 # Set these env vars or update defaults to your whisper.cpp installation
-WHISPER_CPP_PATH = os.environ.get(
+WHISPER_CPP_PATH = os.path.expanduser(os.environ.get(
     "WHISPER_CPP_PATH",
-    os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
-)
-WHISPER_MODEL_PATH = os.environ.get(
+    "~/whisper.cpp/build/bin/whisper-cli"
+))
+WHISPER_MODEL_PATH = os.path.expanduser(os.environ.get(
     "WHISPER_MODEL_PATH",
-    os.path.expanduser("~/whisper.cpp/models/ggml-base.en.bin")
-)
+    "~/whisper.cpp/models/ggml-base.en.bin"
+))
 FALLBACK_TO_LOCAL = True  # Fall back to local whisper.cpp if cloud fails
 
 
