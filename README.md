@@ -17,9 +17,20 @@ macOS's built-in dictation is... fine. But if you want:
 
 - **Better accuracy** - Whisper consistently outperforms Apple's dictation
 - **Faster results** - ~2 second turnaround via Groq's LPU-accelerated API
+- **Actually free** - Groq's free tier gives you 8 hours of audio/day (vs OpenAI's $0.006/min)
+- **No model download** - Cloud-based, so no 500MB-3GB model to install
 - **Works offline** - Automatic fallback to local whisper.cpp when needed
 - **No training** - Works great out of the box, no "learning your voice"
 - **Privacy option** - Run 100% locally if you prefer
+
+### How it compares
+
+| Solution | Speed | Cost | Setup |
+|----------|-------|------|-------|
+| **Whisper Dictate (Groq)** | ~2s | Free | Just an API key |
+| OpenAI Whisper API | ~3-5s | $0.006/min | API key + payment |
+| Local Whisper | 5-15s | Free | Download 500MB-3GB model |
+| macOS Dictation | ~2s | Free | Built-in (but less accurate) |
 
 Then Whisper Dictate is for you.
 
