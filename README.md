@@ -137,21 +137,21 @@ HOTKEY_KEY = keyboard.Key.f6         # F6
 
 ### Changing the microphone
 
-By default, it uses "MacBook Pro Microphone" - this lets you listen to music on AirPods while dictating through your laptop's built-in mic.
+By default, it uses your system's default input device. This works for most setups.
 
-**Not using a MacBook?** You'll need to change this:
+**Want to dictate while listening to music on AirPods?** Pin to your built-in mic so audio output stays on AirPods while recording uses the laptop mic:
 
-```python
-INPUT_DEVICE = None  # Use system default input
-# Or specify your mic name:
-INPUT_DEVICE = "iMac Microphone"
-INPUT_DEVICE = "USB Microphone"
+```bash
+# Add to your .env file:
+INPUT_DEVICE=MacBook Pro Microphone
 ```
 
 To find your microphone name, run:
 ```bash
 python3 -c "import sounddevice; print(sounddevice.query_devices())"
 ```
+
+Common device names: `MacBook Pro Microphone`, `iMac Microphone`, `USB Microphone`
 
 ## Offline Mode with whisper.cpp
 
