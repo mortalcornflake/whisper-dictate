@@ -137,10 +137,20 @@ HOTKEY_KEY = keyboard.Key.f6         # F6
 
 ### Changing the microphone
 
-By default, it uses "MacBook Pro Microphone" so you can listen to music on AirPods while dictating. To use system default:
+By default, it uses "MacBook Pro Microphone" - this lets you listen to music on AirPods while dictating through your laptop's built-in mic.
+
+**Not using a MacBook?** You'll need to change this:
 
 ```python
 INPUT_DEVICE = None  # Use system default input
+# Or specify your mic name:
+INPUT_DEVICE = "iMac Microphone"
+INPUT_DEVICE = "USB Microphone"
+```
+
+To find your microphone name, run:
+```bash
+python3 -c "import sounddevice; print(sounddevice.query_devices())"
 ```
 
 ## Offline Mode with whisper.cpp
@@ -221,6 +231,25 @@ System Settings > Privacy & Security > Microphone
 </details>
 
 <details>
+<summary><b>Non-US keyboard / special characters not working</b></summary>
+
+The default Right Option key is used for special characters on many non-US keyboard layouts (e.g., `Right Option + e` = `é`). If this conflicts with your typing, change to a different hotkey in `dictate.py`:
+
+```python
+HOTKEY_KEY = keyboard.Key.ctrl_r  # Right Control instead
+HOTKEY_KEY = keyboard.Key.f6      # Or a function key
+```
+
+</details>
+
+<details>
+<summary><b>Clipboard gets overwritten</b></summary>
+
+The app copies text to clipboard before pasting. Your previous clipboard contents will be lost. This is a known limitation - clipboard preservation is on the roadmap.
+
+</details>
+
+<details>
 <summary><b>Weird/wrong language transcription</b></summary>
 
 Recording was too short or mostly silence. Hold the key longer and speak clearly.
@@ -258,15 +287,23 @@ More than enough for personal dictation.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for planned features:
+- Menu bar UI with recording status indicator
+- Clipboard preservation (save/restore previous clipboard)
+- Configurable hotkey via `.env` (no code editing)
+- Language selection (Whisper supports 99 languages)
 - LLM transcript cleanup (remove filler words, fix punctuation)
 - Context-aware formatting per app
-- Menu bar UI
 - Voice commands
 - Snippet expansion
 
 ## Contributing
 
 PRs welcome! Please open an issue first to discuss major changes.
+
+## Questions & Feedback
+
+- **Issues/Bugs**: [Open a GitHub issue](https://github.com/mortalcornflake/whisper-dictate/issues)
+- **Questions**: [@mortalcornflake on X](https://x.com/mortalcornflake)
 
 ## Support
 
