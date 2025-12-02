@@ -5,6 +5,8 @@
 - Transcribe via Groq Whisper API (fast, free tier)
 - Automatic fallback to local whisper.cpp if offline/rate-limited
 - Sound feedback (Pop/Blow/Glass)
+- Clipboard preservation (your clipboard is restored after pasting)
+- Ctrl+Shift+R manual reset + 5-minute auto-reset safety net
 - Auto-start via LaunchAgent
 
 ---
@@ -156,3 +158,5 @@ Option to auto-detect speech start/stop instead of holding key:
 - [ ] Configurable sounds (or disable)
 - [ ] Config file instead of env vars
 - [ ] Proper logging to file with rotation
+- [x] Improve Ctrl+Shift+R reset reliability (stops recorder.recording flag)
+- [x] Add auto-reset safety timeout (5 minutes)

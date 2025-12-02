@@ -105,9 +105,14 @@ open WhisperDictate.app
 | **Release Right Option** | Stop, transcribe, and paste (you'll hear "Blow" then "Glass") |
 | **Ctrl+Shift+R** | Reset if stuck recording (you'll hear "Glass" and see notification) |
 
+**Audio cues explained:**
+- **"Pop"** = Recording started
+- **"Blow"** = Recording stopped, transcribing...
+- **"Glass"** = Done! Clipboard restored and safe to paste
+
 That's it. The transcribed text is automatically pasted wherever your cursor is.
 
-**Note:** If the app gets stuck in recording mode (can happen when switching windows mid-recording), just press **Ctrl+Shift+R** to reset it.
+**Note:** If the app gets stuck in recording mode (can happen when switching windows mid-recording), press **Ctrl+Shift+R** to reset it. As a safety net, recordings automatically reset after 5 minutes.
 
 ## Configuration
 
@@ -228,7 +233,8 @@ System Settings > Privacy & Security > Microphone
 <summary><b>Hotkey not working / Stuck recording</b></summary>
 
 If stuck in recording mode:
-- Press **Ctrl+Shift+R** to reset the recorder
+- Press **Ctrl+Shift+R** to reset the recorder (most reliable fix)
+- Wait 5 minutes for automatic safety reset
 - Or run: `~/whisper-dictate/restart-dictate.sh`
 
 Other issues:
