@@ -252,12 +252,6 @@ HOTKEY_KEY = keyboard.Key.f6      # Or a function key
 
 </details>
 
-<details>
-<summary><b>Clipboard gets overwritten</b></summary>
-
-The app copies text to clipboard before pasting. Your previous clipboard contents will be lost. This is a known limitation - clipboard preservation is on the roadmap.
-
-</details>
 
 <details>
 <summary><b>Weird/wrong language transcription</b></summary>
