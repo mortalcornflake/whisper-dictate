@@ -85,6 +85,8 @@ Raw transcription includes filler words (um, uh, like, you know), false starts, 
 - Added `get_clipboard()` and `set_clipboard()` helper functions
 - Modified `paste_text()` to save/restore clipboard contents
 - Your clipboard is now preserved after dictation
+- Made optional via `PRESERVE_CLIPBOARD` env var (default: true)
+- Disable for faster pasting with no 0.5s delay
 
 ### ✅ Configurable Hotkey via .env (COMPLETED)
 ~~Allow hotkey configuration without editing code~~

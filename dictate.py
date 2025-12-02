@@ -81,6 +81,7 @@ def get_hotkey_name(key):
 # === Configuration ===
 HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
+PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 
@@ -264,10 +265,13 @@ def set_clipboard(text: str):
 
 
 def paste_text(text: str):
-    """Copy text to clipboard, paste it, and restore previous clipboard contents."""
-    # Save current clipboard
-    old_clipboard = get_clipboard()
-    log(f"📋 Saved clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
+    """Copy text to clipboard, paste it, and optionally restore previous clipboard contents."""
+    old_clipboard = None
+
+    # Save current clipboard if preservation is enabled
+    if PRESERVE_CLIPBOARD:
+        old_clipboard = get_clipboard()
+        log(f"📋 Saved clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
 
     # Copy new text and paste
     pyperclip.copy(text)
@@ -279,14 +283,15 @@ def paste_text(text: str):
     ])
     log(f"✅ Pasted: {text[:50]}{'...' if len(text) > 50 else ''}")
 
-    # Wait for paste to complete before restoring clipboard
-    time.sleep(0.5)
+    if PRESERVE_CLIPBOARD and old_clipboard is not None:
+        # Wait for paste to complete before restoring clipboard
+        time.sleep(0.5)
 
-    # Restore original clipboard after paste completes
-    set_clipboard(old_clipboard)
-    log(f"♻️  Restored clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
+        # Restore original clipboard after paste completes
+        set_clipboard(old_clipboard)
+        log(f"♻️  Restored clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
 
-    # Play sound AFTER clipboard is restored, so user knows it's safe to paste
+    # Play sound AFTER clipboard operations complete
     sound("Glass")
 
 
