@@ -103,8 +103,11 @@ open WhisperDictate.app
 |--------|--------|
 | **Hold Right Option** | Start recording (you'll hear a "Pop") |
 | **Release Right Option** | Stop, transcribe, and paste (you'll hear "Blow" then "Glass") |
+| **Ctrl+Shift+R** | Reset if stuck recording (you'll hear "Glass" and see notification) |
 
 That's it. The transcribed text is automatically pasted wherever your cursor is.
+
+**Note:** If the app gets stuck in recording mode (can happen when switching windows mid-recording), just press **Ctrl+Shift+R** to reset it.
 
 ## Configuration
 
@@ -222,11 +225,18 @@ System Settings > Privacy & Security > Microphone
 </details>
 
 <details>
-<summary><b>Hotkey not working</b></summary>
+<summary><b>Hotkey not working / Stuck recording</b></summary>
 
-- Check the app is running: `ps aux | grep dictate`
+If stuck in recording mode:
+- Press **Ctrl+Shift+R** to reset the recorder
+- Or run: `~/whisper-dictate/restart-dictate.sh`
+
+Other issues:
+- Check the app is running: `pgrep -fl dictate`
 - Check for conflicts with system shortcuts (Siri uses F5, Dictation uses Fn Fn)
 - Try a different hotkey
+
+**Common cause:** Switching windows or notifications while holding the hotkey can lose the key release event.
 
 </details>
 
@@ -268,7 +278,17 @@ Recording was too short or mostly silence. Hold the key longer and speak clearly
 <summary><b>View logs</b></summary>
 
 ```bash
-tail -f ~/whisper-dictate/dictate.log
+tail -f ~/whisper-dictate.log
+```
+
+Check if running:
+```bash
+pgrep -fl dictate
+```
+
+Restart if needed:
+```bash
+~/whisper-dictate/restart-dictate.sh
 ```
 
 </details>
