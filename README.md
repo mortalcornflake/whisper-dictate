@@ -36,21 +36,37 @@ Then Whisper Dictate is for you.
 
 ## Quick Start
 
+### Step 1: Download
+
+**Option A: If you have git** (most developers)
 ```bash
-# Clone the repo
 git clone https://github.com/mortalcornflake/whisper-dictate.git
 cd whisper-dictate
+```
 
-# Run the installer
+**Option B: No git? Download directly**
+1. Go to [https://github.com/mortalcornflake/whisper-dictate](https://github.com/mortalcornflake/whisper-dictate)
+2. Click the green **"< > Code"** button
+3. Click **"Download ZIP"**
+4. Unzip the file
+5. Open Terminal and navigate to the folder:
+   ```bash
+   cd ~/Downloads/whisper-dictate-main
+   ```
+
+### Step 2: Install
+
+```bash
 ./install.sh
 ```
 
 The installer will:
-1. Set up Python environment
-2. Install dependencies
-3. Configure your API key
-4. Optionally set up auto-start
+1. Check Python is installed (install from [python.org](https://www.python.org) if needed)
+2. Set up Python environment
+3. Install dependencies
+4. Help you get a FREE Groq API key
 5. Guide you through macOS permissions
+6. Optionally set up auto-start
 
 ## Manual Installation
 
@@ -195,7 +211,42 @@ Or use the manual restart script:
 ~/whisper-dictate/restart-dictate.sh
 ```
 
-## Troubleshooting
+## Quick Troubleshooting
+
+### Is it running?
+```bash
+pgrep -fl dictate
+```
+If you see output with "dictate.py", it's running. If not:
+```bash
+cd ~/whisper-dictate
+source venv/bin/activate
+python dictate.py
+```
+
+### Stuck recording?
+**Just tap the Right Option key again** - this will stop the recording immediately.
+
+Or press **Ctrl+Shift+R** to reset everything.
+
+### How do I restart it?
+```bash
+~/whisper-dictate/restart-dictate.sh
+```
+
+### Not recording / no dictation?
+1. Check Terminal has **Microphone** permission (System Settings > Privacy & Security > Microphone)
+2. Check Terminal has **Accessibility** permission (System Settings > Privacy & Security > Accessibility)
+3. Make sure you added your Groq API key to `.env`
+
+### Where are the logs?
+```bash
+tail -f ~/whisper-dictate.log
+```
+
+---
+
+## Detailed Troubleshooting
 
 <details>
 <summary><b>"This process is not trusted"</b></summary>

@@ -427,6 +427,9 @@ class DictationListener:
         log("Press Ctrl+C to quit")
         log("=" * 50)
 
+        # Show startup notification so user knows it's running
+        notify("Whisper Dictate", f"Ready! Hold {get_hotkey_name(HOTKEY_KEY)} to dictate")
+
         with keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release
