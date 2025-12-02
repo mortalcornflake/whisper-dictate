@@ -7,7 +7,7 @@
 - Sound feedback (Pop/Blow/Glass)
 - Clipboard preservation (your clipboard is restored after pasting)
 - Ctrl+Shift+R manual reset + 5-minute auto-reset safety net
-- Auto-start via LaunchAgent
+- Manual startup via Terminal (permissions work reliably)
 
 ---
 

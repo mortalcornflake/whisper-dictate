@@ -81,7 +81,7 @@ cp .env.example .env
 
 **Accessibility** (required for keyboard monitoring):
 1. System Settings > Privacy & Security > Accessibility
-2. Click + and add `WhisperDictate.app` (or Terminal)
+2. Click + and add Terminal.app
 3. Toggle ON
 
 **Microphone** (required for recording):
@@ -91,8 +91,9 @@ cp .env.example .env
 ### 4. Run it
 
 ```bash
-open WhisperDictate.app
-# Or: source venv/bin/activate && python dictate.py
+source venv/bin/activate && python dictate.py
+# Or run in background:
+nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 ```
 
 </details>
@@ -178,31 +179,19 @@ DICTATE_BACKEND=local
 
 ## Auto-start on Login
 
-The installer can set this up, or manually:
+Add to your shell profile (`~/.zshrc` or `~/.bash_profile`):
 
 ```bash
-# Create LaunchAgent
-cat > ~/Library/LaunchAgents/com.whisper-dictate.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.whisper-dictate</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/open</string>
-        <string>-a</string>
-        <string>/path/to/whisper-dictate/WhisperDictate.app</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>
-EOF
+# Auto-start Whisper Dictate
+if ! pgrep -f "dictate.py" > /dev/null; then
+    cd ~/whisper-dictate && source venv/bin/activate && \
+    nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
+fi
+```
 
-# Load it
-launchctl load ~/Library/LaunchAgents/com.whisper-dictate.plist
+Or use the manual restart script:
+```bash
+~/whisper-dictate/restart-dictate.sh
 ```
 
 ## Troubleshooting
@@ -210,7 +199,7 @@ launchctl load ~/Library/LaunchAgents/com.whisper-dictate.plist
 <details>
 <summary><b>"This process is not trusted"</b></summary>
 
-Accessibility permission not granted. Add Python.app or WhisperDictate.app to:
+Accessibility permission not granted. Add Terminal.app to:
 System Settings > Privacy & Security > Accessibility
 
 </details>
