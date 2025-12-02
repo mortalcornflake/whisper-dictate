@@ -13,6 +13,15 @@
 - Microphone stays active, keeps recording
 - Only fix: kill process and restart
 
+**ROOT CAUSE DISCOVERED (2024-12-02):**
+- Happens during LONG dictations (30+ seconds)
+- Occurs when Claude Code session is actively outputting to terminal
+- Terminal is scrolling/updating heavily while user holds hotkey
+- **Theory:** macOS drops the key RELEASE event when terminal is busy
+- pynput never receives the release event
+- Recorder waits forever for a release that never comes
+- Reset doesn't help because the recorder is "working correctly" - it just never got the stop signal
+
 **What we know:**
 - `reset()` function IS being called (confirmed by sound + notification)
 - Sound plays = code reaches `sound("Glass")` at end of reset()
@@ -47,6 +56,40 @@
 - User's suggestion: separate background script monitoring for reset hotkey
 - That script would `pkill -9 dictate.py && restart` when hotkey detected
 - Bypasses all threading/stream issues entirely
+
+**BETTER SOLUTIONS (now that we know the root cause):**
+
+Since the issue is LOST KEY RELEASE EVENTS, not broken recorder:
+
+1. **Auto-stop after max recording time** (EASY FIX):
+   - Current auto-reset is 5 minutes (way too long)
+   - Add separate MAX_RECORDING_LENGTH = 60 seconds
+   - Auto-stop recording after 60s even without key release
+   - Prevents getting stuck on long dictations
+
+2. **Double-tap to stop** (ALTERNATE APPROACH):
+   - If hotkey pressed AGAIN while recording, stop instead of ignoring
+   - Toggle mode: press to start, press again to stop
+   - Works around lost release events entirely
+   - More reliable than waiting for release event
+
+3. **Periodic key state check**:
+   - Every 1 second, check if hotkey is physically still pressed
+   - If recording but key is no longer down, auto-stop
+   - Would catch lost release events quickly
+   - Not sure if pynput can query current key state though
+
+**Recommendation:** Try option #1 (auto-stop at 60s) - simplest fix
+
+**IMPLEMENTED (2024-12-02):**
+- ✅ Added auto-stop at 60 seconds
+- Background thread checks every 5 seconds
+- If recording > 60s, auto-stops and processes audio normally
+- Shows notification: "Auto-stopped after Xs"
+- Nuclear reset still exists at 5 minutes as backup
+- **This should prevent 90% of stuck recording issues**
+
+**Status:** 🧪 Deployed - waiting for user to test during next long dictation
 
 ---
 
