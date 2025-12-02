@@ -200,8 +200,26 @@ def transcribe(audio_bytes: bytes) -> str:
             return ""
 
 
+def get_clipboard() -> str:
+    """Get current clipboard contents using pbpaste."""
+    result = subprocess.run(['pbpaste'], capture_output=True, text=True)
+    return result.stdout
+
+
+def set_clipboard(text: str):
+    """Set clipboard contents using pbcopy."""
+    subprocess.run(['pbcopy'], input=text.encode(), check=True)
+
+
 def paste_text(text: str):
-    """Copy text to clipboard and simulate Cmd+V."""
+    """Copy text to clipboard, paste it, and restore previous clipboard contents."""
+    import time
+
+    # Save current clipboard
+    old_clipboard = get_clipboard()
+    log(f"📋 Saved clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
+
+    # Copy new text and paste
     pyperclip.copy(text)
 
     # Use osascript to paste (more reliable than pyautogui on macOS)
@@ -210,6 +228,15 @@ def paste_text(text: str):
         'tell application "System Events" to keystroke "v" using command down'
     ])
     log(f"✅ Pasted: {text[:50]}{'...' if len(text) > 50 else ''}")
+
+    # Wait for paste to complete before restoring clipboard
+    time.sleep(0.5)
+
+    # Restore original clipboard after paste completes
+    set_clipboard(old_clipboard)
+    log(f"♻️  Restored clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
+
+    # Play sound AFTER clipboard is restored, so user knows it's safe to paste
     sound("Glass")
 
 

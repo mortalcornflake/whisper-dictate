@@ -76,23 +76,13 @@ Raw transcription includes filler words (um, uh, like, you know), false starts, 
 
 ## Other Future Ideas
 
-### Clipboard Preservation
-Save clipboard contents before pasting, restore after:
-```python
-import subprocess
+### ✅ Clipboard Preservation (COMPLETED)
+~~Save clipboard contents before pasting, restore after~~
 
-def get_clipboard():
-    return subprocess.run(['pbpaste'], capture_output=True, text=True).stdout
-
-def set_clipboard(text):
-    subprocess.run(['pbcopy'], input=text.encode(), check=True)
-
-# In paste_text():
-old_clipboard = get_clipboard()
-pyperclip.copy(text)
-# ... paste ...
-set_clipboard(old_clipboard)  # Restore
-```
+**Status**: Implemented in dictate.py
+- Added `get_clipboard()` and `set_clipboard()` helper functions
+- Modified `paste_text()` to save/restore clipboard contents
+- Your clipboard is now preserved after dictation
 
 ### Configurable Hotkey via .env
 Allow hotkey configuration without editing code:
