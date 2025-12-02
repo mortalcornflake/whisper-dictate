@@ -113,7 +113,7 @@ nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 
 That's it. The transcribed text is automatically pasted wherever your cursor is.
 
-**Note:** If the app gets stuck in recording mode (can happen when switching windows mid-recording), press **Ctrl+Shift+R** to reset it. As a safety net, recordings automatically reset after 5 minutes.
+**Note:** Recordings auto-stop after 60 seconds to prevent getting stuck from lost key release events (e.g., during heavy terminal output). If still stuck, press **Ctrl+Shift+R** to reset.
 
 ## Configuration
 
