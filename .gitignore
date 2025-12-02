@@ -20,7 +20,3 @@ dictate.log
 # IDE
 .vscode/
 .idea/
-
-# Local test/experimental files
-StartWhisper.app/
-start-whisper.scpt
