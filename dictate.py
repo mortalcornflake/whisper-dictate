@@ -30,6 +30,7 @@ def log(msg):
 # === Configuration ===
 # Using Right Option key alone for simplicity
 HOTKEY_KEY = keyboard.Key.alt_r  # Right Option key
+RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 
@@ -216,13 +217,23 @@ class DictationListener:
     def __init__(self):
         self.recorder = Recorder()
         self.is_recording = False
+        self.pressed_keys = set()
 
     def on_press(self, key):
+        self.pressed_keys.add(key)
+
+        # Check for reset combo: Ctrl+Shift+R
+        if (RESET_COMBO.issubset(self.pressed_keys) and
+            (key == keyboard.KeyCode.from_char('r') or key == keyboard.KeyCode.from_char('R'))):
+            self.reset()
+            return
+
         if key == HOTKEY_KEY and not self.is_recording:
             self.is_recording = True
             self.recorder.start()
 
     def on_release(self, key):
+        self.pressed_keys.discard(key)
 
         if self.is_recording and key == HOTKEY_KEY:
             self.is_recording = False
@@ -241,6 +252,21 @@ class DictationListener:
         if text:
             paste_text(text)
 
+    def reset(self):
+        """Reset recorder if stuck - triggered by Ctrl+Shift+R."""
+        log("⚙️  Reset triggered (Ctrl+Shift+R)")
+        self.is_recording = False
+        if self.recorder.stream:
+            try:
+                self.recorder.stream.stop()
+                self.recorder.stream.close()
+            except:
+                pass
+        self.recorder = Recorder()
+        notify("Whisper Dictate", "Recorder reset - ready to record")
+        sound("Glass")
+        log("✅ Recorder reset complete")
+
     def run(self):
         log("=" * 50)
         log("Whisper Dictate")
@@ -249,6 +275,7 @@ class DictationListener:
         if FALLBACK_TO_LOCAL:
             log(f"Fallback: local whisper.cpp")
         log(f"Hotkey: Right Option key (hold to record)")
+        log(f"Reset: Ctrl+Shift+R (if stuck recording)")
         log("Press Ctrl+C to quit")
         log("=" * 50)
 
