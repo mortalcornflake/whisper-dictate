@@ -125,6 +125,9 @@ GROQ_API_KEY=gsk_your_key_here
 # Optional: Change hotkey (default: alt_r = Right Option)
 # HOTKEY=alt_r  # Options: alt_r, alt_l, ctrl_r, ctrl_l, cmd_r, cmd_l, f5, f6, f7, f8, f9, f10
 
+# Optional: Preserve clipboard after pasting (default: true)
+# PRESERVE_CLIPBOARD=false  # Set to false for faster pasting (no 0.5s delay)
+
 # Optional: Use OpenAI instead of Groq
 # OPENAI_API_KEY=sk-your_key_here
 # DICTATE_BACKEND=openai
