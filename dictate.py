@@ -7,15 +7,21 @@ Hold the hotkey, speak, release to transcribe and paste.
 import io
 import os
 import sys
-from dotenv import load_dotenv
-
-# Load .env file from script directory
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+import time
 import wave
 import tempfile
 import threading
 import subprocess
 from pathlib import Path
+
+# Suppress urllib3 SSL warning (cosmetic, caused by system Python's LibreSSL)
+import warnings
+warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL')
+
+from dotenv import load_dotenv
+
+# Load .env file from script directory
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 import numpy as np
 import sounddevice as sd
@@ -27,9 +33,53 @@ from pynput import keyboard
 def log(msg):
     print(msg, flush=True)
 
+
+def parse_hotkey(key_str):
+    """Parse hotkey string from .env to pynput Key object."""
+    key_map = {
+        'alt_r': keyboard.Key.alt_r,
+        'alt_l': keyboard.Key.alt_l,
+        'option_r': keyboard.Key.alt_r,  # macOS alias
+        'option_l': keyboard.Key.alt_l,  # macOS alias
+        'ctrl_r': keyboard.Key.ctrl_r,
+        'ctrl_l': keyboard.Key.ctrl_l,
+        'cmd_r': keyboard.Key.cmd_r,
+        'cmd_l': keyboard.Key.cmd_l,
+        'shift_r': keyboard.Key.shift_r,
+        'shift_l': keyboard.Key.shift_l,
+        'f5': keyboard.Key.f5,
+        'f6': keyboard.Key.f6,
+        'f7': keyboard.Key.f7,
+        'f8': keyboard.Key.f8,
+        'f9': keyboard.Key.f9,
+        'f10': keyboard.Key.f10,
+    }
+    return key_map.get(key_str.lower(), keyboard.Key.alt_r)
+
+
+def get_hotkey_name(key):
+    """Get friendly name for hotkey."""
+    name_map = {
+        keyboard.Key.alt_r: "Right Option",
+        keyboard.Key.alt_l: "Left Option",
+        keyboard.Key.ctrl_r: "Right Control",
+        keyboard.Key.ctrl_l: "Left Control",
+        keyboard.Key.cmd_r: "Right Command",
+        keyboard.Key.cmd_l: "Left Command",
+        keyboard.Key.shift_r: "Right Shift",
+        keyboard.Key.shift_l: "Left Shift",
+        keyboard.Key.f5: "F5",
+        keyboard.Key.f6: "F6",
+        keyboard.Key.f7: "F7",
+        keyboard.Key.f8: "F8",
+        keyboard.Key.f9: "F9",
+        keyboard.Key.f10: "F10",
+    }
+    return name_map.get(key, str(key))
+
+
 # === Configuration ===
-# Using Right Option key alone for simplicity
-HOTKEY_KEY = keyboard.Key.alt_r  # Right Option key
+HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
@@ -78,7 +128,6 @@ class Recorder:
         self.start_time = None
 
     def start(self):
-        import time
         self.frames = []
         self.recording = True
         self.start_time = time.time()
@@ -216,8 +265,6 @@ def set_clipboard(text: str):
 
 def paste_text(text: str):
     """Copy text to clipboard, paste it, and restore previous clipboard contents."""
-    import time
-
     # Save current clipboard
     old_clipboard = get_clipboard()
     log(f"📋 Saved clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
@@ -315,7 +362,6 @@ class DictationListener:
 
     def _auto_reset_check(self):
         """Periodically check if recording has been stuck for too long."""
-        import time
         MAX_RECORDING_TIME = 300  # 5 minutes - safety net for truly stuck recordings
 
         while True:
@@ -338,7 +384,7 @@ class DictationListener:
         log(f"Backend: {BACKEND}")
         if FALLBACK_TO_LOCAL:
             log(f"Fallback: local whisper.cpp")
-        log(f"Hotkey: Right Option key (hold to record)")
+        log(f"Hotkey: {get_hotkey_name(HOTKEY_KEY)} (hold to record)")
         log(f"Reset: Ctrl+Shift+R (if stuck recording)")
         log("Press Ctrl+C to quit")
         log("=" * 50)

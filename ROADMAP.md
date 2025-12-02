@@ -1,7 +1,7 @@
 # Whisper Dictate - Future Roadmap
 
 ## Current State (v1)
-- Hold Right Option key to record
+- Configurable hotkey via .env (default: Right Option key)
 - Transcribe via Groq Whisper API (fast, free tier)
 - Automatic fallback to local whisper.cpp if offline/rate-limited
 - Sound feedback (Pop/Blow/Glass)
@@ -86,14 +86,13 @@ Raw transcription includes filler words (um, uh, like, you know), false starts, 
 - Modified `paste_text()` to save/restore clipboard contents
 - Your clipboard is now preserved after dictation
 
-### Configurable Hotkey via .env
-Allow hotkey configuration without editing code:
-```bash
-# .env
-HOTKEY=alt_r        # Right Option (default)
-HOTKEY=ctrl_r       # Right Control
-HOTKEY=f6           # F6
-```
+### ✅ Configurable Hotkey via .env (COMPLETED)
+~~Allow hotkey configuration without editing code~~
+
+**Status**: Implemented in dictate.py
+- Added `parse_hotkey()` function to parse env var to pynput key
+- Supports: alt_r, alt_l, ctrl_r, ctrl_l, cmd_r, cmd_l, f5-f10, and more
+- Configure via `HOTKEY=` in `.env` - no code editing needed
 
 ### Language Selection
 Whisper supports 99 languages. Add language hint for better accuracy:
@@ -153,10 +152,12 @@ Option to auto-detect speech start/stop instead of holding key:
 ---
 
 ## Technical Debt
-- [ ] Suppress urllib3 SSL warning properly
+- [x] Suppress urllib3 SSL warning properly
+- [x] Improve Ctrl+Shift+R reset reliability (stops recorder.recording flag)
+- [x] Add auto-reset safety timeout (5 minutes)
+- [x] Move imports to top of file (code cleanup)
+- [x] Configurable hotkey via .env
 - [ ] Better error handling for malformed audio
 - [ ] Configurable sounds (or disable)
 - [ ] Config file instead of env vars
 - [ ] Proper logging to file with rotation
-- [x] Improve Ctrl+Shift+R reset reliability (stops recorder.recording flag)
-- [x] Add auto-reset safety timeout (5 minutes)

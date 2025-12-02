@@ -122,6 +122,9 @@ All settings can be configured via environment variables in `.env`:
 # Required: Groq API key (free at console.groq.com)
 GROQ_API_KEY=gsk_your_key_here
 
+# Optional: Change hotkey (default: alt_r = Right Option)
+# HOTKEY=alt_r  # Options: alt_r, alt_l, ctrl_r, ctrl_l, cmd_r, cmd_l, f5, f6, f7, f8, f9, f10
+
 # Optional: Use OpenAI instead of Groq
 # OPENAI_API_KEY=sk-your_key_here
 # DICTATE_BACKEND=openai
@@ -129,18 +132,6 @@ GROQ_API_KEY=gsk_your_key_here
 # Optional: Local whisper.cpp for offline fallback
 # WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
 # WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-base.en.bin
-```
-
-### Changing the hotkey
-
-Edit `dictate.py` and change `HOTKEY_KEY`:
-
-```python
-# Options:
-HOTKEY_KEY = keyboard.Key.alt_r      # Right Option (default)
-HOTKEY_KEY = keyboard.Key.alt_l      # Left Option
-HOTKEY_KEY = keyboard.Key.ctrl_r     # Right Control
-HOTKEY_KEY = keyboard.Key.f6         # F6
 ```
 
 ### Changing the microphone
@@ -249,11 +240,11 @@ Other issues:
 <details>
 <summary><b>Non-US keyboard / special characters not working</b></summary>
 
-The default Right Option key is used for special characters on many non-US keyboard layouts (e.g., `Right Option + e` = `é`). If this conflicts with your typing, change to a different hotkey in `dictate.py`:
+The default Right Option key is used for special characters on many non-US keyboard layouts (e.g., `Right Option + e` = `é`). If this conflicts with your typing, change to a different hotkey in your `.env`:
 
-```python
-HOTKEY_KEY = keyboard.Key.ctrl_r  # Right Control instead
-HOTKEY_KEY = keyboard.Key.f6      # Or a function key
+```bash
+HOTKEY=ctrl_r  # Right Control instead
+# Or use a function key: f6, f7, f8, etc.
 ```
 
 </details>
