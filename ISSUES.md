@@ -21,18 +21,24 @@
   - Improved key detection logic (didn't help)
   - Added `self.recorder.recording = False` before stream.stop() (didn't help)
   - Added exception handling (didn't help)
+  - **2024-12-02 FIX:** More aggressive termination (NEEDS TESTING):
+    - Added `is_resetting` flag to block new recordings during reset
+    - Changed `stream.stop()` to `stream.abort()` for immediate termination
+    - Added explicit frames buffer clear
+    - Added 0.1s delay for stream thread termination
+    - Prevented hotkey from starting recording if `is_resetting=True`
 
 **Hypothesis:**
-- Stream callback may be ignoring the `recording = False` flag
-- Race condition between reset() and audio callback thread
-- Stream.stop() may not be synchronous on macOS
-- Need to investigate sounddevice stream lifecycle
+- Stream.stop() is too graceful - audio callback thread keeps running
+- stream.abort() should forcefully terminate immediately
+- Race condition: new recording could start before reset completes
 
-**Next steps:**
-- Add more aggressive stream termination
-- Try stream.abort() instead of stream.close()
-- Add flag to completely prevent new recordings after reset
-- Consider recreating the entire listener, not just recorder
+**Status:** 🧪 TESTING - User needs to try Ctrl+Shift+R when stuck and report back
+
+**If this doesn't work:**
+- Consider full listener restart instead of just recorder reset
+- May need to investigate sounddevice internals or switch audio library
+- Could add a "nuclear" reset that recreates the entire DictationListener
 
 ---
 
