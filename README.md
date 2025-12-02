@@ -102,8 +102,9 @@ nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 
 | Action | Result |
 |--------|--------|
-| **Hold Right Option** | Start recording (you'll hear a "Pop") |
+| **Press Right Option** | Start recording (you'll hear a "Pop") |
 | **Release Right Option** | Stop, transcribe, and paste (you'll hear "Blow" then "Glass") |
+| **Press Right Option again** | Also stops recording (works if release event is lost) |
 | **Ctrl+Shift+R** | Reset if stuck recording (you'll hear "Glass" and see notification) |
 
 **Audio cues explained:**
@@ -113,7 +114,7 @@ nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 
 That's it. The transcribed text is automatically pasted wherever your cursor is.
 
-**Note:** Recordings auto-stop after 60 seconds to prevent getting stuck from lost key release events (e.g., during heavy terminal output). If still stuck, press **Ctrl+Shift+R** to reset.
+**Note:** If you get stuck recording (macOS can lose key release events during heavy terminal output), just tap the Right Option key again to stop.
 
 ## Configuration
 

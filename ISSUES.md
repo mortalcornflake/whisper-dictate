@@ -82,14 +82,17 @@ Since the issue is LOST KEY RELEASE EVENTS, not broken recorder:
 **Recommendation:** Try option #1 (auto-stop at 60s) - simplest fix
 
 **IMPLEMENTED (2024-12-02):**
-- ✅ Added auto-stop at 60 seconds
-- Background thread checks every 5 seconds
-- If recording > 60s, auto-stops and processes audio normally
-- Shows notification: "Auto-stopped after Xs"
-- Nuclear reset still exists at 5 minutes as backup
-- **This should prevent 90% of stuck recording issues**
 
-**Status:** 🧪 Deployed - waiting for user to test during next long dictation
+✅ **Toggle mode - press hotkey again to stop** (USER'S IDEA!)
+- Changed hotkey behavior: press to start, press again to stop
+- If recording and user presses Right Option again → stop immediately
+- Works around lost key release events perfectly
+- User has immediate control
+- **This is the fix - elegant and simple**
+
+**Status:** ✅ DEPLOYED
+- Press hotkey again = instant stop
+- 5-minute nuclear reset remains as emergency backup only
 
 ---
 

@@ -319,10 +319,24 @@ class DictationListener:
             self.reset()
             return
 
-        # Don't allow new recordings if resetting or already recording
-        if key == HOTKEY_KEY and not self.is_recording and not self.is_resetting:
-            self.is_recording = True
-            self.recorder.start()
+        # Toggle recording: press to start, press again to stop
+        if key == HOTKEY_KEY and not self.is_resetting:
+            if not self.is_recording:
+                # Start recording
+                self.is_recording = True
+                self.recorder.start()
+            else:
+                # Stop recording (works around lost key release events)
+                log("⚙️  Hotkey pressed again - stopping recording")
+                self.is_recording = False
+                audio_bytes = self.recorder.stop()
+
+                if audio_bytes:
+                    threading.Thread(
+                        target=self._process_audio,
+                        args=(audio_bytes,),
+                        daemon=True
+                    ).start()
 
     def on_release(self, key):
         self.pressed_keys.discard(key)
@@ -383,31 +397,16 @@ class DictationListener:
         log("✅ Recorder reset complete (old stream abandoned)")
 
     def _auto_reset_check(self):
-        """Periodically check if recording has been running too long."""
-        MAX_RECORDING_TIME = 60  # Auto-stop after 60 seconds to prevent lost key release
+        """Periodically check if recording has been stuck for way too long."""
         STUCK_RECORDING_TIME = 300  # 5 minutes - safety net for truly stuck recordings
 
         while True:
-            time.sleep(5)  # Check every 5 seconds
+            time.sleep(10)  # Check every 10 seconds
             if self.is_recording and self.recorder.start_time:
                 elapsed = time.time() - self.recorder.start_time
 
-                # Auto-stop long recordings (likely lost key release event)
-                if elapsed > MAX_RECORDING_TIME:
-                    log(f"⚠️  Recording exceeded {MAX_RECORDING_TIME}s - auto-stopping (likely lost key release)")
-                    self.is_recording = False
-                    audio_bytes = self.recorder.stop()
-                    notify("Whisper Dictate", f"Auto-stopped after {int(elapsed)}s")
-
-                    if audio_bytes:
-                        threading.Thread(
-                            target=self._process_audio,
-                            args=(audio_bytes,),
-                            daemon=True
-                        ).start()
-
                 # Nuclear reset if something is really broken
-                elif elapsed > STUCK_RECORDING_TIME:
+                if elapsed > STUCK_RECORDING_TIME:
                     log(f"⚠️  Recording stuck for {int(elapsed)}s - forcing reset")
                     self.reset(reason=f"Auto-reset after {int(elapsed//60)} minutes")
 
