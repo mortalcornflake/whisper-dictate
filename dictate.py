@@ -75,10 +75,13 @@ class Recorder:
         self.frames = []
         self.recording = False
         self.stream = None
+        self.start_time = None
 
     def start(self):
+        import time
         self.frames = []
         self.recording = True
+        self.start_time = time.time()
         self.stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,
@@ -245,13 +248,21 @@ class DictationListener:
         self.recorder = Recorder()
         self.is_recording = False
         self.pressed_keys = set()
+        self._start_auto_reset_checker()
 
     def on_press(self, key):
         self.pressed_keys.add(key)
 
         # Check for reset combo: Ctrl+Shift+R
-        if (RESET_COMBO.issubset(self.pressed_keys) and
-            (key == keyboard.KeyCode.from_char('r') or key == keyboard.KeyCode.from_char('R'))):
+        # Handle both char keys and key codes
+        is_r_key = False
+        try:
+            if hasattr(key, 'char') and key.char in ['r', 'R']:
+                is_r_key = True
+        except AttributeError:
+            pass
+
+        if RESET_COMBO.issubset(self.pressed_keys) and is_r_key:
             self.reset()
             return
 
@@ -279,20 +290,46 @@ class DictationListener:
         if text:
             paste_text(text)
 
-    def reset(self):
-        """Reset recorder if stuck - triggered by Ctrl+Shift+R."""
-        log("⚙️  Reset triggered (Ctrl+Shift+R)")
+    def reset(self, reason="Manual (Ctrl+Shift+R)"):
+        """Reset recorder if stuck."""
+        log(f"⚙️  Reset triggered: {reason}")
         self.is_recording = False
-        if self.recorder.stream:
+
+        # Stop the recorder's internal recording flag FIRST
+        if self.recorder:
+            self.recorder.recording = False
+
+        # Then stop and close the stream
+        if self.recorder and self.recorder.stream:
             try:
                 self.recorder.stream.stop()
                 self.recorder.stream.close()
-            except:
-                pass
+            except Exception as e:
+                log(f"⚠️  Error stopping stream: {e}")
+
+        # Create fresh recorder
         self.recorder = Recorder()
         notify("Whisper Dictate", "Recorder reset - ready to record")
         sound("Glass")
         log("✅ Recorder reset complete")
+
+    def _auto_reset_check(self):
+        """Periodically check if recording has been stuck for too long."""
+        import time
+        MAX_RECORDING_TIME = 300  # 5 minutes - safety net for truly stuck recordings
+
+        while True:
+            time.sleep(10)  # Check every 10 seconds
+            if self.is_recording and self.recorder.start_time:
+                elapsed = time.time() - self.recorder.start_time
+                if elapsed > MAX_RECORDING_TIME:
+                    log(f"⚠️  Recording stuck for {int(elapsed)}s - auto-resetting")
+                    self.reset(reason=f"Auto-reset after {int(elapsed//60)} minutes")
+
+    def _start_auto_reset_checker(self):
+        """Start background thread to monitor for stuck recordings."""
+        checker_thread = threading.Thread(target=self._auto_reset_check, daemon=True)
+        checker_thread.start()
 
     def run(self):
         log("=" * 50)
