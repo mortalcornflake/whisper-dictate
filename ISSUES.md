@@ -21,24 +21,32 @@
   - Improved key detection logic (didn't help)
   - Added `self.recorder.recording = False` before stream.stop() (didn't help)
   - Added exception handling (didn't help)
-  - **2024-12-02 FIX:** More aggressive termination (NEEDS TESTING):
+  - **2024-12-02 FIX #1:** More aggressive termination (FAILED):
     - Added `is_resetting` flag to block new recordings during reset
     - Changed `stream.stop()` to `stream.abort()` for immediate termination
     - Added explicit frames buffer clear
-    - Added 0.1s delay for stream thread termination
-    - Prevented hotkey from starting recording if `is_resetting=True`
+    - **Result:** STILL DIDN'T WORK - stream kept recording
+
+  - **2024-12-02 FIX #2:** NUCLEAR OPTION (TESTING NOW):
+    - Don't try to stop/abort/close the stream at all
+    - Just set `recorder.stream = None` and abandon it
+    - Create completely fresh Recorder immediately
+    - Attempt to kill old stream in background thread (but don't wait)
+    - If background kill fails, we don't care - stream is leaked but we've moved on
+    - This makes reset instant and non-blocking
 
 **Hypothesis:**
-- Stream.stop() is too graceful - audio callback thread keeps running
-- stream.abort() should forcefully terminate immediately
-- Race condition: new recording could start before reset completes
+- The stream can't be reliably stopped from keyboard listener thread
+- Threading issue: callback thread doesn't see flag updates in time
+- Trying to stop the stream blocks or fails silently
+- **New approach:** Just abandon the stream and create new one - nuclear but effective
 
-**Status:** 🧪 TESTING - User needs to try Ctrl+Shift+R when stuck and report back
+**Status:** 🧪 TESTING NOW - User stuck and needs to try Ctrl+Shift+R
 
 **If this doesn't work:**
-- Consider full listener restart instead of just recorder reset
-- May need to investigate sounddevice internals or switch audio library
-- Could add a "nuclear" reset that recreates the entire DictationListener
+- User's suggestion: separate background script monitoring for reset hotkey
+- That script would `pkill -9 dictate.py && restart` when hotkey detected
+- Bypasses all threading/stream issues entirely
 
 ---
 
