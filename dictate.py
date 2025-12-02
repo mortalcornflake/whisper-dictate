@@ -345,37 +345,34 @@ class DictationListener:
             paste_text(text)
 
     def reset(self, reason="Manual (Ctrl+Shift+R)"):
-        """Reset recorder if stuck - more aggressive termination."""
+        """Reset recorder if stuck - NUCLEAR OPTION: abandon old stream completely."""
         log(f"⚙️  Reset triggered: {reason}")
 
-        # Set flags to block new recordings and stop current recording
+        # Set flags to block operations
         self.is_resetting = True
         self.is_recording = False
 
-        # Stop the recorder's internal recording flag FIRST
+        # Mark old recorder as dead (don't try to stop it)
         if self.recorder:
             self.recorder.recording = False
-
-            # Clear any buffered frames
             self.recorder.frames = []
+            # IMPORTANT: Just set stream to None, don't try to stop/close/abort
+            # Let the old stream thread die on its own or leak - we don't care
+            old_stream = self.recorder.stream
+            self.recorder.stream = None
 
-        # Then aggressively terminate the stream
-        if self.recorder and self.recorder.stream:
-            try:
-                # Use abort() for immediate termination instead of graceful stop()
-                self.recorder.stream.abort()
-            except Exception as e:
-                log(f"⚠️  Error aborting stream: {e}")
+            # Try to kill it in background thread so it doesn't block
+            if old_stream:
+                def kill_stream():
+                    try:
+                        old_stream.abort()
+                        old_stream.close()
+                    except:
+                        pass  # If it fails, we don't care
 
-            # Give the stream thread time to fully terminate
-            time.sleep(0.1)
+                threading.Thread(target=kill_stream, daemon=True).start()
 
-            try:
-                self.recorder.stream.close()
-            except Exception as e:
-                log(f"⚠️  Error closing stream: {e}")
-
-        # Create fresh recorder
+        # Create completely fresh recorder immediately
         self.recorder = Recorder()
 
         # Re-enable recordings
@@ -383,7 +380,7 @@ class DictationListener:
 
         notify("Whisper Dictate", "Recorder reset - ready to record")
         sound("Glass")
-        log("✅ Recorder reset complete")
+        log("✅ Recorder reset complete (old stream abandoned)")
 
     def _auto_reset_check(self):
         """Periodically check if recording has been stuck for too long."""
