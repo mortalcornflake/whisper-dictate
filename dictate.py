@@ -82,6 +82,7 @@ def get_hotkey_name(key):
 HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
+AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 
@@ -290,6 +291,15 @@ def paste_text(text: str):
         # Restore original clipboard after paste completes
         set_clipboard(old_clipboard)
         log(f"♻️  Restored clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
+
+    # Automatically press Enter/Return if enabled
+    if AUTO_PRESS_ENTER:
+        time.sleep(0.1)  # Brief pause to ensure paste completes
+        subprocess.run([
+            "osascript", "-e",
+            'tell application "System Events" to key code 36'  # 36 is Return key
+        ])
+        log("⏎  Pressed Enter")
 
     # Play sound AFTER clipboard operations complete
     sound("Glass")
