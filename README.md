@@ -122,6 +122,7 @@ nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 | **Release Right Option** | Stop, transcribe, and paste (you'll hear "Blow" then "Glass") |
 | **Press Right Option again** | Also stops recording (works if release event is lost) |
 | **Ctrl+Shift+R** | Reset if stuck recording (you'll hear "Glass" and see notification) |
+| **`~/whisper-dictate/force-reset.sh`** | Force reset from another terminal (if keyboard shortcuts not working) |
 
 **Audio cues explained:**
 - **"Pop"** = Recording started
@@ -145,6 +146,9 @@ GROQ_API_KEY=gsk_your_key_here
 
 # Optional: Preserve clipboard after pasting (default: true)
 # PRESERVE_CLIPBOARD=false  # Set to false for faster pasting (no 0.5s delay)
+
+# Optional: Auto-press Enter/Return after pasting (default: false)
+# AUTO_PRESS_ENTER=true  # Automatically press Enter after transcription
 
 # Optional: Use OpenAI instead of Groq
 # OPENAI_API_KEY=sk-your_key_here
@@ -227,7 +231,10 @@ python dictate.py
 ### Stuck recording?
 **Just tap the Right Option key again** - this will stop the recording immediately.
 
-Or press **Ctrl+Shift+R** to reset everything.
+If that doesn't work, try these in order:
+1. **Ctrl+Shift+R** - keyboard reset
+2. **`~/whisper-dictate/force-reset.sh`** - signal-based reset (doesn't kill the process)
+3. **`~/whisper-dictate/restart-dictate.sh`** - full restart (kills and restarts)
 
 ### How do I restart it?
 ```bash
@@ -267,10 +274,12 @@ System Settings > Privacy & Security > Microphone
 <details>
 <summary><b>Hotkey not working / Stuck recording</b></summary>
 
-If stuck in recording mode:
-- Press **Ctrl+Shift+R** to reset the recorder (most reliable fix)
-- Wait 5 minutes for automatic safety reset
-- Or run: `~/whisper-dictate/restart-dictate.sh`
+If stuck in recording mode, try these in order:
+1. **Tap the hotkey again** (Right Option) - toggle mode will stop it
+2. **Ctrl+Shift+R** - keyboard-based reset
+3. **`~/whisper-dictate/force-reset.sh`** - external reset via signals (doesn't kill the process)
+4. **Wait 5 minutes** - automatic safety reset kicks in
+5. **`~/whisper-dictate/restart-dictate.sh`** - full restart (kills and restarts the process)
 
 Other issues:
 - Check the app is running: `pgrep -fl dictate`
