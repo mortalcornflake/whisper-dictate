@@ -150,6 +150,9 @@ GROQ_API_KEY=gsk_your_key_here
 # Optional: Auto-press Enter/Return after pasting (default: false)
 # AUTO_PRESS_ENTER=true  # Automatically press Enter after transcription
 
+# Optional: Auto-stop timeout in seconds (default: 45)
+# AUTO_STOP_TIMEOUT=45  # Auto-stop and transcribe stuck recordings after 45s
+
 # Optional: Use OpenAI instead of Groq
 # OPENAI_API_KEY=sk-your_key_here
 # DICTATE_BACKEND=openai

@@ -83,6 +83,7 @@ HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
+AUTO_STOP_TIMEOUT = int(os.environ.get("AUTO_STOP_TIMEOUT", "45"))  # Seconds before auto-stop stuck recordings
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 
@@ -153,8 +154,14 @@ class Recorder:
         if self.stream:
             self.stream.stop()
             self.stream.close()
-        log("⏹️  Stopped recording")
-        sound("Blow")
+
+        # Calculate and log recording duration
+        duration = 0
+        if self.start_time:
+            duration = time.time() - self.start_time
+
+        log(f"⏹️  Stopped recording (duration: {duration:.1f}s)")
+        # Note: sound is played by caller, not here
 
         if not self.frames:
             return b""
@@ -320,12 +327,20 @@ class DictationListener:
         # Handle both char keys and key codes
         is_r_key = False
         try:
-            if hasattr(key, 'char') and key.char in ['r', 'R']:
+            if hasattr(key, 'char') and key.char and key.char.lower() == 'r':
                 is_r_key = True
-        except AttributeError:
+        except (AttributeError, TypeError):
+            pass
+
+        # Also check vk code for 'r' key (vk 15 on macOS)
+        try:
+            if hasattr(key, 'vk') and key.vk == 15:
+                is_r_key = True
+        except (AttributeError, TypeError):
             pass
 
         if RESET_COMBO.issubset(self.pressed_keys) and is_r_key:
+            log("🔄 Ctrl+Shift+R detected - resetting")
             self.reset()
             return
 
@@ -339,44 +354,153 @@ class DictationListener:
                 # Stop recording (works around lost key release events)
                 log("⚙️  Hotkey pressed again - stopping recording")
                 self.is_recording = False
-                audio_bytes = self.recorder.stop()
+                self.recorder.recording = False  # Stop capturing new audio immediately
+                sound("Blow")  # Play sound immediately so user knows it stopped
 
-                if audio_bytes:
-                    threading.Thread(
-                        target=self._process_audio,
-                        args=(audio_bytes,),
-                        daemon=True
-                    ).start()
+                # Capture references before spawning thread to avoid race conditions
+                frames_to_process = self.recorder.frames[:]  # Copy list
+                start_time = self.recorder.start_time
+                old_stream = self.recorder.stream
+
+                # Clear immediately so new recordings can start
+                self.recorder.stream = None
+                self.recorder.frames = []
+
+                # Extract and process audio in background thread
+                def extract_and_process():
+                    try:
+                        # Extract audio from captured frames
+                        if frames_to_process:
+                            audio_data = np.concatenate(frames_to_process, axis=0)
+
+                            # Convert to WAV bytes
+                            buffer = io.BytesIO()
+                            with wave.open(buffer, "wb") as wf:
+                                wf.setnchannels(CHANNELS)
+                                wf.setsampwidth(2)  # 16-bit
+                                wf.setframerate(SAMPLE_RATE)
+                                wf.writeframes(audio_data.tobytes())
+
+                            audio_bytes = buffer.getvalue()
+
+                            duration = 0
+                            if start_time:
+                                duration = time.time() - start_time
+                            log(f"⏹️  Stopped recording (duration: {duration:.1f}s)")
+
+                            if audio_bytes:
+                                self._process_audio(audio_bytes)
+
+                        # Abandon the old stream
+                        if old_stream:
+                            try:
+                                old_stream.abort()
+                                old_stream.close()
+                            except:
+                                pass
+                    except Exception as e:
+                        log(f"⚠️  Error extracting audio: {e}")
+
+                threading.Thread(target=extract_and_process, daemon=True).start()
 
     def on_release(self, key):
         self.pressed_keys.discard(key)
 
         if self.is_recording and key == HOTKEY_KEY:
             self.is_recording = False
-            audio_bytes = self.recorder.stop()
+            self.recorder.recording = False  # Stop capturing new audio immediately
+            sound("Blow")  # Play sound immediately so user knows it stopped
 
-            if audio_bytes:
-                # Process in background thread so we don't block the listener
-                threading.Thread(
-                    target=self._process_audio,
-                    args=(audio_bytes,),
-                    daemon=True
-                ).start()
+            # Capture references before spawning thread to avoid race conditions
+            frames_to_process = self.recorder.frames[:]  # Copy list
+            start_time = self.recorder.start_time
+            old_stream = self.recorder.stream
+
+            # Clear immediately so new recordings can start
+            self.recorder.stream = None
+            self.recorder.frames = []
+
+            # Extract and process audio in background thread
+            def extract_and_process():
+                try:
+                    # Extract audio from captured frames
+                    if frames_to_process:
+                        audio_data = np.concatenate(frames_to_process, axis=0)
+
+                        # Convert to WAV bytes
+                        buffer = io.BytesIO()
+                        with wave.open(buffer, "wb") as wf:
+                            wf.setnchannels(CHANNELS)
+                            wf.setsampwidth(2)  # 16-bit
+                            wf.setframerate(SAMPLE_RATE)
+                            wf.writeframes(audio_data.tobytes())
+
+                        audio_bytes = buffer.getvalue()
+
+                        duration = 0
+                        if start_time:
+                            duration = time.time() - start_time
+                        log(f"⏹️  Stopped recording (duration: {duration:.1f}s)")
+
+                        if audio_bytes:
+                            self._process_audio(audio_bytes)
+
+                    # Abandon the old stream
+                    if old_stream:
+                        try:
+                            old_stream.abort()
+                            old_stream.close()
+                        except:
+                            pass
+                except Exception as e:
+                    log(f"⚠️  Error extracting audio: {e}")
+
+            threading.Thread(target=extract_and_process, daemon=True).start()
 
     def _process_audio(self, audio_bytes: bytes):
         text = transcribe(audio_bytes)
         if text:
             paste_text(text)
 
-    def reset(self, reason="Manual (Ctrl+Shift+R)"):
-        """Reset recorder if stuck - NUCLEAR OPTION: abandon old stream completely."""
+    def reset(self, reason="Manual (Ctrl+Shift+R)", process_audio=False):
+        """Reset recorder if stuck - optionally process audio before resetting."""
         log(f"⚙️  Reset triggered: {reason}")
 
         # Set flags to block operations
         self.is_resetting = True
         self.is_recording = False
 
-        # Mark old recorder as dead (don't try to stop it)
+        # Try to save and process the audio before clearing
+        # Extract audio directly from frames WITHOUT calling stop() (which can hang on stuck stream)
+        if process_audio and self.recorder and self.recorder.frames:
+            log("💾 Attempting to save stuck recording...")
+            try:
+                # Directly extract audio from frames, bypassing stream operations
+                if self.recorder.frames:
+                    audio_data = np.concatenate(self.recorder.frames, axis=0)
+
+                    # Convert to WAV bytes
+                    buffer = io.BytesIO()
+                    with wave.open(buffer, "wb") as wf:
+                        wf.setnchannels(CHANNELS)
+                        wf.setsampwidth(2)  # 16-bit
+                        wf.setframerate(SAMPLE_RATE)
+                        wf.writeframes(audio_data.tobytes())
+
+                    audio_bytes = buffer.getvalue()
+
+                    if audio_bytes:
+                        log(f"✅ Recovered {len(audio_bytes)} bytes - transcribing...")
+                        # Process in background thread
+                        threading.Thread(
+                            target=self._process_audio,
+                            args=(audio_bytes,),
+                            daemon=True
+                        ).start()
+            except Exception as e:
+                log(f"⚠️  Could not recover audio: {e}")
+
+        # Mark old recorder as dead - ABANDON THE STREAM, DON'T TRY TO CLOSE IT
         if self.recorder:
             self.recorder.recording = False
             self.recorder.frames = []
@@ -408,17 +532,17 @@ class DictationListener:
 
     def _auto_reset_check(self):
         """Periodically check if recording has been stuck for way too long."""
-        STUCK_RECORDING_TIME = 300  # 5 minutes - safety net for truly stuck recordings
-
         while True:
-            time.sleep(10)  # Check every 10 seconds
+            time.sleep(5)  # Check every 5 seconds
             if self.is_recording and self.recorder.start_time:
                 elapsed = time.time() - self.recorder.start_time
 
-                # Nuclear reset if something is really broken
-                if elapsed > STUCK_RECORDING_TIME:
-                    log(f"⚠️  Recording stuck for {int(elapsed)}s - forcing reset")
-                    self.reset(reason=f"Auto-reset after {int(elapsed//60)} minutes")
+                # Auto-reset and process the audio if stuck
+                if elapsed > AUTO_STOP_TIMEOUT:
+                    log(f"⚠️  Recording stuck for {int(elapsed)}s - forcing reset and transcribing")
+                    # Play stop sound immediately so user knows recording stopped
+                    sound("Blow")
+                    self.reset(reason=f"Auto-reset after {int(elapsed)} seconds", process_audio=True)
 
     def _start_auto_reset_checker(self):
         """Start background thread to monitor for stuck recordings."""
