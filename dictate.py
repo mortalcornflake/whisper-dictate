@@ -113,7 +113,7 @@ WHISPER_MODEL_PATH = os.path.expanduser(os.environ.get(
     "WHISPER_MODEL_PATH",
     "~/whisper.cpp/models/ggml-base.en.bin"
 ))
-FALLBACK_TO_LOCAL = True  # Fall back to local whisper.cpp if cloud fails
+FALLBACK_TO_LOCAL = os.environ.get("FALLBACK_TO_LOCAL", "true").lower() in ("true", "1", "yes")
 WHISPER_SERVER_PORT = 8080  # Port for whisper server
 WHISPER_SERVER_IDLE_TIMEOUT = 1800  # Shutdown server after 30 min idle (seconds)
 
