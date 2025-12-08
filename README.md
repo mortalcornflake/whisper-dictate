@@ -67,7 +67,8 @@ The installer will:
 3. Install dependencies
 4. Help you get a FREE Groq API key
 5. Guide you through macOS permissions
-6. Optionally set up auto-start
+6. **Optionally install whisper.cpp for local fallback** (clones, builds, downloads model)
+7. Optionally set up auto-start
 
 ## Manual Installation
 
@@ -158,7 +159,11 @@ GROQ_API_KEY=gsk_your_key_here
 # OPENAI_API_KEY=sk-your_key_here
 # DICTATE_BACKEND=openai
 
-# Optional: Local whisper.cpp for offline fallback
+# Optional: Enable/disable local fallback (default: true)
+# Set to false if you don't have whisper.cpp installed
+# FALLBACK_TO_LOCAL=true
+
+# Optional: Local whisper.cpp paths (configured automatically by installer)
 # WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
 # WHISPER_SERVER_PATH=~/whisper.cpp/build/bin/whisper-server
 # WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-large-v3-turbo.bin
@@ -184,7 +189,14 @@ Common device names: `MacBook Pro Microphone`, `iMac Microphone`, `USB Microphon
 
 ## Offline Mode with whisper.cpp
 
-For fully local transcription (private, no API needed):
+**Recommended: Use the installer** - it handles everything automatically:
+```bash
+./install.sh
+# When prompted "Install local fallback support?", answer Y
+# Choose model: 1=base.en (fast), 2=small.en (balanced), 3=large-v3-turbo (best)
+```
+
+**Manual setup** (if you prefer):
 
 ```bash
 # Install whisper.cpp
@@ -200,11 +212,12 @@ cd models
 ./download-ggml-model.sh large-v3-turbo # Best accuracy (1.5GB)
 
 # Add to your .env
+FALLBACK_TO_LOCAL=true
 WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
 WHISPER_SERVER_PATH=~/whisper.cpp/build/bin/whisper-server
 WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-large-v3-turbo.bin
 
-# Optional: Use local-only mode (disables Groq fallback)
+# Optional: Use local-only mode (no cloud API)
 DICTATE_BACKEND=local
 ```
 
