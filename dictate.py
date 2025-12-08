@@ -12,6 +12,8 @@ import wave
 import tempfile
 import threading
 import subprocess
+import multiprocessing
+import signal
 from pathlib import Path
 
 # Suppress urllib3 SSL warning (cosmetic, caused by system Python's LibreSSL)
@@ -103,11 +105,22 @@ WHISPER_CPP_PATH = os.path.expanduser(os.environ.get(
     "WHISPER_CPP_PATH",
     "~/whisper.cpp/build/bin/whisper-cli"
 ))
+WHISPER_SERVER_PATH = os.path.expanduser(os.environ.get(
+    "WHISPER_SERVER_PATH",
+    "~/whisper.cpp/build/bin/whisper-server"
+))
 WHISPER_MODEL_PATH = os.path.expanduser(os.environ.get(
     "WHISPER_MODEL_PATH",
     "~/whisper.cpp/models/ggml-base.en.bin"
 ))
 FALLBACK_TO_LOCAL = True  # Fall back to local whisper.cpp if cloud fails
+WHISPER_SERVER_PORT = 8080  # Port for whisper server
+WHISPER_SERVER_IDLE_TIMEOUT = 1800  # Shutdown server after 30 min idle (seconds)
+
+# Global server state (lazy initialization)
+_whisper_server_process = None
+_whisper_server_last_used = None
+_whisper_server_lock = threading.Lock()
 
 
 def notify(title, message):
@@ -123,60 +136,145 @@ def sound(name="Pop"):
     subprocess.run(["afplay", f"/System/Library/Sounds/{name}.aiff"], capture_output=True)
 
 
+def recording_worker(output_path, device_name, sample_rate, channels):
+    """
+    Worker function that runs in a subprocess to record audio.
+    Writes raw audio frames to a file continuously until killed.
+    """
+    import numpy as np
+    import sounddevice as sd
+    import signal
+    import sys
+
+    frames = []
+    recording = True
+    should_exit = False
+
+    def callback(indata, frame_count, time_info, status):
+        if recording:
+            frames.append(indata.copy())
+
+    def signal_handler(signum, frame):
+        # Handle termination signal - save and exit
+        nonlocal should_exit, recording
+        recording = False
+        should_exit = True
+
+    # Register signal handlers
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Start recording
+    stream = sd.InputStream(
+        samplerate=sample_rate,
+        channels=channels,
+        dtype=np.int16,
+        device=device_name,
+        callback=callback
+    )
+    stream.start()
+
+    try:
+        # Record until signaled to stop
+        while not should_exit:
+            time.sleep(0.1)
+    finally:
+        # Save what we recorded before exiting
+        recording = False
+        try:
+            stream.stop()
+            stream.close()
+        except:
+            pass
+
+        # ALWAYS save frames, even if stream fails
+        if frames:
+            try:
+                audio_data = np.concatenate(frames, axis=0)
+                # Save as raw numpy array
+                np.save(output_path, audio_data)
+                sys.stdout.flush()  # Ensure writes complete
+            except Exception as e:
+                # Log to stderr which parent can see
+                print(f"Error saving audio: {e}", file=sys.stderr)
+                sys.stderr.flush()
+
+
 class Recorder:
+    """Subprocess-based recorder that can be forcefully killed."""
+
     def __init__(self):
-        self.frames = []
-        self.recording = False
-        self.stream = None
+        self.process = None
+        self.temp_file = None
         self.start_time = None
 
     def start(self):
-        self.frames = []
-        self.recording = True
+        # Create temp file for this recording
+        self.temp_file = tempfile.NamedTemporaryFile(suffix='.npy', delete=False)
+        self.temp_file.close()
+
         self.start_time = time.time()
-        self.stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=np.int16,
-            device=INPUT_DEVICE,
-            callback=self._callback
+
+        # Spawn subprocess to handle recording
+        self.process = multiprocessing.Process(
+            target=recording_worker,
+            args=(self.temp_file.name, INPUT_DEVICE, SAMPLE_RATE, CHANNELS)
         )
-        self.stream.start()
+        self.process.start()
+
         log("🎤 Recording...")
         sound("Pop")
 
-    def _callback(self, indata, frame_count, time_info, status):
-        if self.recording:
-            self.frames.append(indata.copy())
-
     def stop(self) -> bytes:
-        self.recording = False
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
-
-        # Calculate and log recording duration
+        """Stop recording subprocess and extract audio."""
         duration = 0
         if self.start_time:
             duration = time.time() - self.start_time
 
-        log(f"⏹️  Stopped recording (duration: {duration:.1f}s)")
-        # Note: sound is played by caller, not here
+        log(f"⏹️  Stopping recording subprocess (duration: {duration:.1f}s)")
 
-        if not self.frames:
-            return b""
+        # Kill the subprocess
+        if self.process and self.process.is_alive():
+            log("🔫 Terminating recording subprocess...")
+            self.process.terminate()  # Send SIGTERM - subprocess will save and exit
+            self.process.join(timeout=5)  # Wait up to 5 seconds for clean shutdown
 
-        audio_data = np.concatenate(self.frames, axis=0)
+            if self.process.is_alive():
+                log("💀 Force killing stuck subprocess...")
+                self.process.kill()  # SIGKILL - nuclear option
+                self.process.join(timeout=2)
 
-        # Convert to WAV bytes
-        buffer = io.BytesIO()
-        with wave.open(buffer, "wb") as wf:
-            wf.setnchannels(CHANNELS)
-            wf.setsampwidth(2)  # 16-bit
-            wf.setframerate(SAMPLE_RATE)
-            wf.writeframes(audio_data.tobytes())
+        # Give subprocess a moment to finish writing file
+        time.sleep(0.1)
 
-        return buffer.getvalue()
+        # Read the recorded audio from temp file
+        audio_bytes = b""
+        try:
+            if os.path.exists(self.temp_file.name):
+                audio_data = np.load(self.temp_file.name)
+
+                if len(audio_data) > 0:
+                    # Convert to WAV bytes
+                    buffer = io.BytesIO()
+                    with wave.open(buffer, "wb") as wf:
+                        wf.setnchannels(CHANNELS)
+                        wf.setsampwidth(2)  # 16-bit
+                        wf.setframerate(SAMPLE_RATE)
+                        wf.writeframes(audio_data.tobytes())
+
+                    audio_bytes = buffer.getvalue()
+                    log(f"✅ Extracted {len(audio_bytes)} bytes from subprocess")
+        except Exception as e:
+            log(f"⚠️  Error reading recorded audio: {e}")
+        finally:
+            # Cleanup temp file
+            try:
+                if self.temp_file and os.path.exists(self.temp_file.name):
+                    os.unlink(self.temp_file.name)
+            except:
+                pass
+
+        return audio_bytes
 
 
 def transcribe_groq(audio_bytes: bytes) -> str:
@@ -188,7 +286,7 @@ def transcribe_groq(audio_bytes: bytes) -> str:
         "https://api.groq.com/openai/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-        data={"model": "whisper-large-v3"},
+        data={"model": "whisper-large-v3"},  # Use full v3 on Groq's LPUs for max accuracy
         timeout=30
     )
 
@@ -218,8 +316,140 @@ def transcribe_openai(audio_bytes: bytes) -> str:
     return response.json().get("text", "")
 
 
+def start_whisper_server():
+    """Start whisper server in background (lazy initialization)."""
+    global _whisper_server_process, _whisper_server_last_used
+
+    with _whisper_server_lock:
+        # Check if already running
+        if _whisper_server_process and _whisper_server_process.poll() is None:
+            _whisper_server_last_used = time.time()
+            return
+
+        # Check if server binary exists
+        if not os.path.exists(WHISPER_SERVER_PATH):
+            log(f"⚠️  whisper-server not found at {WHISPER_SERVER_PATH} - using CLI mode")
+            return
+
+        log(f"🚀 Starting whisper server (model will load, ~5-10sec)...")
+
+        # Start server process
+        cmd = [
+            WHISPER_SERVER_PATH,
+            "-m", WHISPER_MODEL_PATH,
+            "--port", str(WHISPER_SERVER_PORT),
+            "--host", "127.0.0.1"
+        ]
+
+        _whisper_server_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Wait for server to be ready (check if port is listening)
+        max_wait = 30  # seconds
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            # Check if process died during startup
+            if _whisper_server_process.poll() is not None:
+                log("⚠️  Whisper server process died during startup - falling back to CLI mode")
+                _whisper_server_process = None
+                return
+
+            try:
+                response = requests.get(f"http://127.0.0.1:{WHISPER_SERVER_PORT}/", timeout=1)
+                if response.status_code in (200, 404):  # Server is up
+                    _whisper_server_last_used = time.time()
+                    log(f"✅ Whisper server ready (PID: {_whisper_server_process.pid})")
+                    return
+            except requests.exceptions.RequestException:
+                time.sleep(0.5)
+
+        # Timeout - kill the stuck process and clean up
+        log("⚠️  Whisper server startup timeout - killing process and falling back to CLI mode")
+        try:
+            _whisper_server_process.kill()
+            _whisper_server_process.wait(timeout=2)
+        except:
+            pass
+        _whisper_server_process = None
+
+
+def stop_whisper_server():
+    """Stop the whisper server if running."""
+    global _whisper_server_process
+
+    with _whisper_server_lock:
+        if _whisper_server_process and _whisper_server_process.poll() is None:
+            log(f"🛑 Stopping whisper server (PID: {_whisper_server_process.pid})")
+            _whisper_server_process.terminate()
+            try:
+                _whisper_server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                log("⚠️  Server didn't stop gracefully, force killing...")
+                _whisper_server_process.kill()
+                _whisper_server_process.wait(timeout=2)
+        _whisper_server_process = None
+
+
+def check_server_idle():
+    """Background thread to shutdown idle server."""
+    global _whisper_server_last_used
+
+    while True:
+        time.sleep(60)  # Check every minute
+
+        # Use lock to safely read server state
+        with _whisper_server_lock:
+            if _whisper_server_process and _whisper_server_last_used:
+                idle_time = time.time() - _whisper_server_last_used
+                if idle_time > WHISPER_SERVER_IDLE_TIMEOUT:
+                    log(f"💤 Whisper server idle for {int(idle_time/60)}min - shutting down")
+
+        # Call stop outside the lock to avoid deadlock
+        if _whisper_server_process and _whisper_server_last_used:
+            idle_time = time.time() - _whisper_server_last_used
+            if idle_time > WHISPER_SERVER_IDLE_TIMEOUT:
+                stop_whisper_server()
+
+
 def transcribe_local(audio_bytes: bytes) -> str:
-    """Transcribe using local whisper.cpp."""
+    """Transcribe using local whisper.cpp (server mode with fallback to CLI)."""
+    global _whisper_server_last_used, _whisper_server_process
+
+    # Try server mode first (if available)
+    if _whisper_server_process and _whisper_server_process.poll() is None:
+        try:
+            _whisper_server_last_used = time.time()
+
+            # Send audio to server
+            files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+            data = {
+                "temperature": "0.0",
+                "response_format": "json"
+            }
+
+            response = requests.post(
+                f"http://127.0.0.1:{WHISPER_SERVER_PORT}/inference",
+                files=files,
+                data=data,
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("text", "").strip()
+        except Exception as e:
+            log(f"⚠️  Server request failed: {e} - falling back to CLI")
+    elif _whisper_server_process and _whisper_server_process.poll() is not None:
+        # Server died - clean up and mark for restart on next fallback
+        log("⚠️  Server process died - cleaning up")
+        with _whisper_server_lock:
+            _whisper_server_process = None
+
+    # Fallback to CLI mode (loads model each time)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         f.write(audio_bytes)
         temp_path = f.name
@@ -228,7 +458,7 @@ def transcribe_local(audio_bytes: bytes) -> str:
         cmd = [WHISPER_CPP_PATH]
         if WHISPER_MODEL_PATH:
             cmd.extend(["-m", WHISPER_MODEL_PATH])
-        cmd.extend(["-f", temp_path, "--no-timestamps", "-nt"])
+        cmd.extend(["-f", temp_path, "--no-timestamps", "--best-of", "5", "--beam-size", "5", "--language", "en"])
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result.stdout.strip()
@@ -254,6 +484,10 @@ def transcribe(audio_bytes: bytes) -> str:
         if FALLBACK_TO_LOCAL and BACKEND != "local":
             log(f"⚠️  Cloud failed ({e}), falling back to local whisper.cpp...")
             notify("Whisper Dictate", f"Using local fallback: {e}")
+
+            # Start server on first fallback (lazy initialization)
+            start_whisper_server()
+
             return transcribe_local(audio_bytes)
         else:
             log(f"❌ Transcription failed: {e}")
@@ -314,10 +548,9 @@ def paste_text(text: str):
 
 class DictationListener:
     def __init__(self):
-        self.recorder = Recorder()
+        self.recorder = None  # Will be created fresh for each recording
         self.is_recording = False
         self.pressed_keys = set()
-        self.is_resetting = False  # Prevent recordings during reset
         self._start_auto_reset_checker()
 
     def on_press(self, key):
@@ -345,117 +578,55 @@ class DictationListener:
             return
 
         # Toggle recording: press to start, press again to stop
-        if key == HOTKEY_KEY and not self.is_resetting:
+        if key == HOTKEY_KEY:
             if not self.is_recording:
-                # Start recording
+                # Start recording - CREATE FRESH RECORDER EVERY TIME
+                log("🎙️  Creating new recorder...")
+                self.recorder = Recorder()  # Brand new instance
                 self.is_recording = True
                 self.recorder.start()
             else:
                 # Stop recording (works around lost key release events)
                 log("⚙️  Hotkey pressed again - stopping recording")
                 self.is_recording = False
-                self.recorder.recording = False  # Stop capturing new audio immediately
                 sound("Blow")  # Play sound immediately so user knows it stopped
 
-                # Capture references before spawning thread to avoid race conditions
-                frames_to_process = self.recorder.frames[:]  # Copy list
-                start_time = self.recorder.start_time
-                old_stream = self.recorder.stream
+                # Dispose of recorder and process in background
+                old_recorder = self.recorder
+                self.recorder = None  # DISPOSE - never reuse
 
-                # Clear immediately so new recordings can start
-                self.recorder.stream = None
-                self.recorder.frames = []
-
-                # Extract and process audio in background thread
-                def extract_and_process():
+                def stop_and_process():
                     try:
-                        # Extract audio from captured frames
-                        if frames_to_process:
-                            audio_data = np.concatenate(frames_to_process, axis=0)
-
-                            # Convert to WAV bytes
-                            buffer = io.BytesIO()
-                            with wave.open(buffer, "wb") as wf:
-                                wf.setnchannels(CHANNELS)
-                                wf.setsampwidth(2)  # 16-bit
-                                wf.setframerate(SAMPLE_RATE)
-                                wf.writeframes(audio_data.tobytes())
-
-                            audio_bytes = buffer.getvalue()
-
-                            duration = 0
-                            if start_time:
-                                duration = time.time() - start_time
-                            log(f"⏹️  Stopped recording (duration: {duration:.1f}s)")
-
+                        if old_recorder:
+                            audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
                             if audio_bytes:
                                 self._process_audio(audio_bytes)
-
-                        # Abandon the old stream
-                        if old_stream:
-                            try:
-                                old_stream.abort()
-                                old_stream.close()
-                            except:
-                                pass
                     except Exception as e:
-                        log(f"⚠️  Error extracting audio: {e}")
+                        log(f"⚠️  Error stopping recorder: {e}")
 
-                threading.Thread(target=extract_and_process, daemon=True).start()
+                threading.Thread(target=stop_and_process, daemon=True).start()
 
     def on_release(self, key):
         self.pressed_keys.discard(key)
 
         if self.is_recording and key == HOTKEY_KEY:
             self.is_recording = False
-            self.recorder.recording = False  # Stop capturing new audio immediately
             sound("Blow")  # Play sound immediately so user knows it stopped
 
-            # Capture references before spawning thread to avoid race conditions
-            frames_to_process = self.recorder.frames[:]  # Copy list
-            start_time = self.recorder.start_time
-            old_stream = self.recorder.stream
+            # Dispose of recorder and process in background
+            old_recorder = self.recorder
+            self.recorder = None  # DISPOSE - never reuse
 
-            # Clear immediately so new recordings can start
-            self.recorder.stream = None
-            self.recorder.frames = []
-
-            # Extract and process audio in background thread
-            def extract_and_process():
+            def stop_and_process():
                 try:
-                    # Extract audio from captured frames
-                    if frames_to_process:
-                        audio_data = np.concatenate(frames_to_process, axis=0)
-
-                        # Convert to WAV bytes
-                        buffer = io.BytesIO()
-                        with wave.open(buffer, "wb") as wf:
-                            wf.setnchannels(CHANNELS)
-                            wf.setsampwidth(2)  # 16-bit
-                            wf.setframerate(SAMPLE_RATE)
-                            wf.writeframes(audio_data.tobytes())
-
-                        audio_bytes = buffer.getvalue()
-
-                        duration = 0
-                        if start_time:
-                            duration = time.time() - start_time
-                        log(f"⏹️  Stopped recording (duration: {duration:.1f}s)")
-
+                    if old_recorder:
+                        audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
                         if audio_bytes:
                             self._process_audio(audio_bytes)
-
-                    # Abandon the old stream
-                    if old_stream:
-                        try:
-                            old_stream.abort()
-                            old_stream.close()
-                        except:
-                            pass
                 except Exception as e:
-                    log(f"⚠️  Error extracting audio: {e}")
+                    log(f"⚠️  Error stopping recorder: {e}")
 
-            threading.Thread(target=extract_and_process, daemon=True).start()
+            threading.Thread(target=stop_and_process, daemon=True).start()
 
     def _process_audio(self, audio_bytes: bytes):
         text = transcribe(audio_bytes)
@@ -463,78 +634,44 @@ class DictationListener:
             paste_text(text)
 
     def reset(self, reason="Manual (Ctrl+Shift+R)", process_audio=False):
-        """Reset recorder if stuck - optionally process audio before resetting."""
+        """Reset recorder - kill subprocess and optionally process audio."""
         log(f"⚙️  Reset triggered: {reason}")
 
-        # Set flags to block operations
-        self.is_resetting = True
         self.is_recording = False
 
-        # Try to save and process the audio before clearing
-        # Extract audio directly from frames WITHOUT calling stop() (which can hang on stuck stream)
-        if process_audio and self.recorder and self.recorder.frames:
-            log("💾 Attempting to save stuck recording...")
+        # Dispose of the old recorder
+        old_recorder = self.recorder
+        self.recorder = None  # Next recording will create fresh instance
+
+        # Kill subprocess and optionally process audio in background
+        def kill_and_process():
             try:
-                # Directly extract audio from frames, bypassing stream operations
-                if self.recorder.frames:
-                    audio_data = np.concatenate(self.recorder.frames, axis=0)
-
-                    # Convert to WAV bytes
-                    buffer = io.BytesIO()
-                    with wave.open(buffer, "wb") as wf:
-                        wf.setnchannels(CHANNELS)
-                        wf.setsampwidth(2)  # 16-bit
-                        wf.setframerate(SAMPLE_RATE)
-                        wf.writeframes(audio_data.tobytes())
-
-                    audio_bytes = buffer.getvalue()
-
-                    if audio_bytes:
-                        log(f"✅ Recovered {len(audio_bytes)} bytes - transcribing...")
-                        # Process in background thread
-                        threading.Thread(
-                            target=self._process_audio,
-                            args=(audio_bytes,),
-                            daemon=True
-                        ).start()
+                if old_recorder:
+                    if process_audio:
+                        log("💾 Attempting to save stuck recording...")
+                        audio_bytes = old_recorder.stop()  # Kills subprocess, extracts audio
+                        if audio_bytes:
+                            log(f"✅ Recovered {len(audio_bytes)} bytes - transcribing...")
+                            self._process_audio(audio_bytes)
+                    else:
+                        # Just kill it without processing
+                        if old_recorder.process and old_recorder.process.is_alive():
+                            old_recorder.process.kill()
+                            old_recorder.process.join()
             except Exception as e:
-                log(f"⚠️  Could not recover audio: {e}")
+                log(f"⚠️  Error during reset: {e}")
 
-        # Mark old recorder as dead - ABANDON THE STREAM, DON'T TRY TO CLOSE IT
-        if self.recorder:
-            self.recorder.recording = False
-            self.recorder.frames = []
-            # IMPORTANT: Just set stream to None, don't try to stop/close/abort
-            # Let the old stream thread die on its own or leak - we don't care
-            old_stream = self.recorder.stream
-            self.recorder.stream = None
-
-            # Try to kill it in background thread so it doesn't block
-            if old_stream:
-                def kill_stream():
-                    try:
-                        old_stream.abort()
-                        old_stream.close()
-                    except:
-                        pass  # If it fails, we don't care
-
-                threading.Thread(target=kill_stream, daemon=True).start()
-
-        # Create completely fresh recorder immediately
-        self.recorder = Recorder()
-
-        # Re-enable recordings
-        self.is_resetting = False
+        threading.Thread(target=kill_and_process, daemon=True).start()
 
         notify("Whisper Dictate", "Recorder reset - ready to record")
         sound("Glass")
-        log("✅ Recorder reset complete (old stream abandoned)")
+        log("✅ Recorder reset complete (subprocess will be killed)")
 
     def _auto_reset_check(self):
         """Periodically check if recording has been stuck for way too long."""
         while True:
             time.sleep(5)  # Check every 5 seconds
-            if self.is_recording and self.recorder.start_time:
+            if self.is_recording and self.recorder and self.recorder.start_time:
                 elapsed = time.time() - self.recorder.start_time
 
                 # Auto-reset and process the audio if stuck
@@ -572,6 +709,9 @@ class DictationListener:
 
 
 def main():
+    # Set multiprocessing start method for macOS
+    multiprocessing.set_start_method('spawn', force=True)
+
     # Check for required API keys based on backend
     if BACKEND == "groq" and not GROQ_API_KEY:
         if FALLBACK_TO_LOCAL:
@@ -589,17 +729,29 @@ def main():
     # Verify local whisper.cpp exists if we might need it
     if FALLBACK_TO_LOCAL or BACKEND == "local":
         if not os.path.exists(WHISPER_CPP_PATH):
-            log(f"❌ whisper.cpp not found at: {WHISPER_CPP_PATH}")
+            log(f"❌ whisper.cpp CLI not found at: {WHISPER_CPP_PATH}")
             sys.exit(1)
+        if not os.path.exists(WHISPER_SERVER_PATH):
+            log(f"⚠️  whisper-server not found at: {WHISPER_SERVER_PATH}")
+            log(f"   Server mode disabled, will use CLI only (slower)")
         if not os.path.exists(WHISPER_MODEL_PATH):
             log(f"❌ Whisper model not found at: {WHISPER_MODEL_PATH}")
             sys.exit(1)
+
+    # Start idle checker thread for whisper server cleanup
+    idle_checker = threading.Thread(target=check_server_idle, daemon=True)
+    idle_checker.start()
+
+    # If using local backend, start server immediately
+    if BACKEND == "local":
+        start_whisper_server()
 
     listener = DictationListener()
     try:
         listener.run()
     except KeyboardInterrupt:
         log("\n👋 Goodbye!")
+        stop_whisper_server()  # Clean shutdown
 
 
 if __name__ == "__main__":

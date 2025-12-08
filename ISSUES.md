@@ -2,7 +2,13 @@
 
 ## Active Issues
 
-### CRITICAL: Ctrl+Shift+R reset doesn't actually stop recording
+None! All known issues have been resolved.
+
+---
+
+## Previously Active Issues
+
+### ✅ RESOLVED: Ctrl+Shift+R reset doesn't actually stop recording
 
 **Status:** Active bug, needs investigation
 **Priority:** High - only workaround is kill/restart process

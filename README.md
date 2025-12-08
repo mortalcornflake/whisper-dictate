@@ -15,22 +15,23 @@ TODO: Add demo GIF here
 
 macOS's built-in dictation is... fine. But if you want:
 
-- **Better accuracy** - Whisper consistently outperforms Apple's dictation
+- **Better accuracy** - Uses OpenAI's Whisper Large v3 (the best Whisper model)
 - **Faster results** - ~2 second turnaround via Groq's LPU-accelerated API
 - **Actually free** - Groq's free tier gives you 8 hours of audio/day (vs OpenAI's $0.006/min)
-- **No model download** - Cloud-based, so no 500MB-3GB model to install
-- **Works offline** - Automatic fallback to local whisper.cpp when needed
+- **Smart fallback** - Automatically switches to local when offline (persistent server mode)
 - **No training** - Works great out of the box, no "learning your voice"
 - **Privacy option** - Run 100% locally if you prefer
+- **Technical terms** - Excellent accuracy on code, APIs, technical jargon
 
 ### How it compares
 
-| Solution | Speed | Cost | Setup |
-|----------|-------|------|-------|
-| **Whisper Dictate (Groq)** | ~2s | Free | Just an API key |
-| OpenAI Whisper API | ~3-5s | $0.006/min | API key + payment |
-| Local Whisper | 5-15s | Free | Download 500MB-3GB model |
-| macOS Dictation | ~2s | Free | Built-in (but less accurate) |
+| Solution | Model | Speed | Cost | Setup |
+|----------|-------|-------|------|-------|
+| **Whisper Dictate (Groq)** | Large v3 | ~2s | Free | Just an API key |
+| OpenAI Whisper API | Large v3 | ~3-5s | $0.006/min | API key + payment |
+| Local Whisper (server) | Large v3 Turbo | ~3-5s | Free | Download 1.5GB model |
+| Local Whisper (CLI) | Base/Small | 5-15s | Free | Download 141-466MB |
+| macOS Dictation | Apple | ~2s | Free | Built-in (less accurate) |
 
 Then Whisper Dictate is for you.
 
@@ -159,7 +160,8 @@ GROQ_API_KEY=gsk_your_key_here
 
 # Optional: Local whisper.cpp for offline fallback
 # WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
-# WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-base.en.bin
+# WHISPER_SERVER_PATH=~/whisper.cpp/build/bin/whisper-server
+# WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-large-v3-turbo.bin
 ```
 
 ### Changing the microphone
@@ -182,24 +184,43 @@ Common device names: `MacBook Pro Microphone`, `iMac Microphone`, `USB Microphon
 
 ## Offline Mode with whisper.cpp
 
-For fully local transcription (slower but private):
+For fully local transcription (private, no API needed):
 
 ```bash
 # Install whisper.cpp
 git clone https://github.com/ggerganov/whisper.cpp
 cd whisper.cpp
-make
+cmake -B build
+cmake --build build
 
-# Download a model
-./models/download-ggml-model.sh base.en
+# Download a model (choose based on speed vs accuracy)
+cd models
+./download-ggml-model.sh base.en        # Fast (141MB)
+./download-ggml-model.sh small.en       # Balanced (466MB)
+./download-ggml-model.sh large-v3-turbo # Best accuracy (1.5GB)
 
 # Add to your .env
 WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
-WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-base.en.bin
+WHISPER_SERVER_PATH=~/whisper.cpp/build/bin/whisper-server
+WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-large-v3-turbo.bin
 
-# Optional: Use local-only mode
+# Optional: Use local-only mode (disables Groq fallback)
 DICTATE_BACKEND=local
 ```
+
+### Local Fallback with Server Mode
+
+When Groq fails (no WiFi, rate limited, VPN blocking), the app automatically:
+1. **First fallback**: Starts whisper-server in background (~5-10sec to load model)
+2. **Subsequent fallbacks**: Uses existing server (instant transcription)
+3. **Auto-cleanup**: Shuts down server after 30 min idle (frees 1.5GB RAM)
+
+See [SERVER_MODE.md](SERVER_MODE.md) for detailed architecture and all failure scenarios.
+
+**Model recommendations:**
+- **large-v3-turbo**: Best accuracy, ~3-5s transcription (recommended)
+- **small.en**: Good balance, ~2-3s transcription
+- **base.en**: Fast but less accurate on technical terms
 
 ## Auto-start on Login
 
