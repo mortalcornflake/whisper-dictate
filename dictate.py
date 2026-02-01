@@ -329,7 +329,7 @@ def transcribe_groq(audio_bytes: bytes) -> str:
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         files={"file": ("audio.wav", audio_bytes, "audio/wav")},
         data={"model": "whisper-large-v3"},  # Use full v3 on Groq's LPUs for max accuracy
-        timeout=300
+        timeout=30
     )
 
     if response.status_code != 200:
@@ -348,7 +348,7 @@ def transcribe_openai(audio_bytes: bytes) -> str:
         headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
         files={"file": ("audio.wav", audio_bytes, "audio/wav")},
         data={"model": "whisper-1"},
-        timeout=300
+        timeout=30
     )
 
     if response.status_code != 200:
@@ -472,7 +472,7 @@ def transcribe_local(audio_bytes: bytes) -> str:
                 f"http://127.0.0.1:{WHISPER_SERVER_PORT}/inference",
                 files=files,
                 data=data,
-                timeout=300
+                timeout=30
             )
 
             if response.status_code == 200:
@@ -497,7 +497,7 @@ def transcribe_local(audio_bytes: bytes) -> str:
             cmd.extend(["-m", WHISPER_MODEL_PATH])
         cmd.extend(["-f", temp_path, "--no-timestamps", "--best-of", "5", "--beam-size", "5", "--language", "en"])
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         return result.stdout.strip()
     finally:
         os.unlink(temp_path)
