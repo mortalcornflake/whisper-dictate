@@ -120,14 +120,14 @@ nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 
 | Action | Result |
 |--------|--------|
-| **Press Right Option** | Start recording (you'll hear a "Pop") |
+| **Press Right Option** | Start recording (you'll hear a "Tink") |
 | **Release Right Option** | Stop, transcribe, and paste (you'll hear "Blow" then "Glass") |
 | **Press Right Option again** | Also stops recording (works if release event is lost) |
 | **Ctrl+Shift+R** | Reset if stuck recording (you'll hear "Glass" and see notification) |
 | **`~/whisper-dictate/force-reset.sh`** | Force reset from another terminal (if keyboard shortcuts not working) |
 
 **Audio cues explained:**
-- **"Pop"** = Recording started
+- **"Tink"** = Recording started
 - **"Blow"** = Recording stopped, transcribing...
 - **"Glass"** = Done! Clipboard restored and safe to paste
 

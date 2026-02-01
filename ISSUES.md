@@ -68,7 +68,7 @@ None! All known issues have been resolved.
 Since the issue is LOST KEY RELEASE EVENTS, not broken recorder:
 
 1. **Auto-stop after max recording time** (EASY FIX):
-   - Current auto-reset is 5 minutes (way too long)
+   - Current auto-reset is 45 seconds (configurable via AUTO_STOP_TIMEOUT)
    - Add separate MAX_RECORDING_LENGTH = 60 seconds
    - Auto-stop recording after 60s even without key release
    - Prevents getting stuck on long dictations
@@ -98,7 +98,7 @@ Since the issue is LOST KEY RELEASE EVENTS, not broken recorder:
 
 **Status:** ✅ DEPLOYED
 - Press hotkey again = instant stop
-- 5-minute nuclear reset remains as emergency backup only
+- 45-second auto-reset remains as emergency backup only
 
 ---
 
