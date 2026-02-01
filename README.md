@@ -237,7 +237,18 @@ See [SERVER_MODE.md](SERVER_MODE.md) for detailed architecture and all failure s
 
 ## Auto-start on Login
 
-Add to your shell profile (`~/.zshrc` or `~/.bash_profile`):
+**Recommended: Login Items** (most reliable)
+
+```bash
+# Add the startup script to Login Items via command line:
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"'$HOME'/whisper-dictate/start-dictate.sh", hidden:true}'
+```
+
+Or manually: System Settings > General > Login Items > click + > select `~/whisper-dictate/start-dictate.sh`
+
+**Alternative: Shell profile**
+
+Add to `~/.zshrc` or `~/.bash_profile`:
 
 ```bash
 # Auto-start Whisper Dictate
@@ -247,7 +258,7 @@ if ! pgrep -f "dictate.py" > /dev/null; then
 fi
 ```
 
-Or use the manual restart script:
+**Manual restart:**
 ```bash
 ~/whisper-dictate/restart-dictate.sh
 ```

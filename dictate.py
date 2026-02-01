@@ -131,20 +131,27 @@ def notify(title, message):
     ], capture_output=True)
 
 
-def sound(name="Pop"):
+def sound(name="Pop", blocking=True):
     """Play system sound."""
-    subprocess.run(["afplay", f"/System/Library/Sounds/{name}.aiff"], capture_output=True)
+    cmd = ["afplay", f"/System/Library/Sounds/{name}.aiff"]
+    if blocking:
+        subprocess.run(cmd, capture_output=True)
+    else:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def recording_worker(output_path, device_name, sample_rate, channels):
+def recording_worker(output_path, device_name, sample_rate, channels, ready_event, go_event):
     """
     Worker function that runs in a subprocess to record audio.
-    Writes raw audio frames to a file continuously until killed.
+    Spawned eagerly so imports are pre-loaded. Waits for go_event before recording.
     """
     import numpy as np
     import sounddevice as sd
     import signal
     import sys
+
+    # Wait for parent to signal us to start recording
+    go_event.wait()
 
     frames = []
     recording = True
@@ -174,6 +181,9 @@ def recording_worker(output_path, device_name, sample_rate, channels):
     )
     stream.start()
 
+    # Signal parent that audio stream is active
+    ready_event.set()
+
     try:
         # Record until signaled to stop
         while not should_exit:
@@ -200,30 +210,52 @@ def recording_worker(output_path, device_name, sample_rate, channels):
                 sys.stderr.flush()
 
 
+def trim_trailing_silence(audio_data, sample_rate=16000, threshold=300, buffer_secs=0.3):
+    """Remove trailing silence to prevent Whisper hallucinations."""
+    if len(audio_data) == 0:
+        return audio_data
+    abs_audio = np.abs(audio_data.flatten())
+    above = np.where(abs_audio > threshold)[0]
+    if len(above) == 0:
+        return audio_data  # All silence - return as-is
+    last_speech = above[-1]
+    buffer_samples = int(buffer_secs * sample_rate)
+    end = min(last_speech + buffer_samples, len(audio_data))
+    return audio_data[:end]
+
+
 class Recorder:
-    """Subprocess-based recorder that can be forcefully killed."""
+    """Subprocess-based recorder that can be forcefully killed.
+    Spawns subprocess eagerly so imports are pre-loaded before recording starts."""
 
     def __init__(self):
-        self.process = None
-        self.temp_file = None
         self.start_time = None
 
-    def start(self):
-        # Create temp file for this recording
+        # Pre-spawn subprocess so it's ready when user presses hotkey
         self.temp_file = tempfile.NamedTemporaryFile(suffix='.npy', delete=False)
         self.temp_file.close()
-
-        self.start_time = time.time()
-
-        # Spawn subprocess to handle recording
+        self.ready_event = multiprocessing.Event()
+        self.go_event = multiprocessing.Event()
         self.process = multiprocessing.Process(
             target=recording_worker,
-            args=(self.temp_file.name, INPUT_DEVICE, SAMPLE_RATE, CHANNELS)
+            args=(self.temp_file.name, INPUT_DEVICE, SAMPLE_RATE, CHANNELS,
+                  self.ready_event, self.go_event)
         )
         self.process.start()
 
-        log("🎤 Recording...")
-        sound("Pop")
+    def start(self):
+        self.start_time = time.time()
+
+        # Signal pre-spawned subprocess to start recording (imports already done)
+        self.go_event.set()
+
+        # Wait for subprocess to confirm audio stream is active
+        if self.ready_event.wait(timeout=3):
+            log("🎤 Recording...")
+        else:
+            log("⚠️  Recording subprocess slow to start")
+
+        sound("Tink", blocking=False)
 
     def stop(self) -> bytes:
         """Stop recording subprocess and extract audio."""
@@ -252,6 +284,7 @@ class Recorder:
         try:
             if os.path.exists(self.temp_file.name):
                 audio_data = np.load(self.temp_file.name)
+                audio_data = trim_trailing_silence(audio_data, sample_rate=SAMPLE_RATE)
 
                 if len(audio_data) > 0:
                     # Convert to WAV bytes
@@ -466,17 +499,24 @@ def transcribe_local(audio_bytes: bytes) -> str:
         os.unlink(temp_path)
 
 
+HALLUCINATION_PHRASES = {
+    "thank you", "thank you.", "thanks for watching", "thanks for watching.",
+    "okay", "okay.", "you", "you.", "yeah", "yeah.", "yes", "yes.",
+}
+
+
 def transcribe(audio_bytes: bytes) -> str:
     """Transcribe audio using configured backend, with local fallback."""
     log(f"📝 Transcribing with {BACKEND}...")
 
+    result = ""
     try:
         if BACKEND == "groq":
-            return transcribe_groq(audio_bytes)
+            result = transcribe_groq(audio_bytes)
         elif BACKEND == "openai":
-            return transcribe_openai(audio_bytes)
+            result = transcribe_openai(audio_bytes)
         elif BACKEND == "local":
-            return transcribe_local(audio_bytes)
+            result = transcribe_local(audio_bytes)
         else:
             log(f"❌ Unknown backend: {BACKEND}")
             return ""
@@ -488,11 +528,18 @@ def transcribe(audio_bytes: bytes) -> str:
             # Start server on first fallback (lazy initialization)
             start_whisper_server()
 
-            return transcribe_local(audio_bytes)
+            result = transcribe_local(audio_bytes)
         else:
             log(f"❌ Transcription failed: {e}")
             notify("Whisper Dictate", f"Transcription failed: {e}")
             return ""
+
+    # Filter known Whisper hallucination phrases (triggered by trailing silence)
+    if result.strip().lower() in HALLUCINATION_PHRASES:
+        log(f"Filtered hallucination: {result.strip()}")
+        return ""
+
+    return result
 
 
 def get_clipboard() -> str:
@@ -548,10 +595,21 @@ def paste_text(text: str):
 
 class DictationListener:
     def __init__(self):
-        self.recorder = None  # Will be created fresh for each recording
+        self.recorder = None
         self.is_recording = False
         self.pressed_keys = set()
+        self._standby_recorder = None
         self._start_auto_reset_checker()
+        self._prepare_standby()
+
+    def _prepare_standby(self):
+        """Pre-spawn a subprocess so it's ready for the next recording."""
+        try:
+            self._standby_recorder = Recorder()
+            log("🔄 Standby recorder ready")
+        except Exception as e:
+            log(f"⚠️  Failed to prepare standby recorder: {e}")
+            self._standby_recorder = None
 
     def on_press(self, key):
         self.pressed_keys.add(key)
@@ -580,16 +638,19 @@ class DictationListener:
         # Toggle recording: press to start, press again to stop
         if key == HOTKEY_KEY:
             if not self.is_recording:
-                # Start recording - CREATE FRESH RECORDER EVERY TIME
-                log("🎙️  Creating new recorder...")
-                self.recorder = Recorder()  # Brand new instance
+                # Use pre-spawned standby recorder, or create fresh if none available
+                if self._standby_recorder:
+                    self.recorder = self._standby_recorder
+                    self._standby_recorder = None
+                else:
+                    log("🎙️  No standby ready, spawning new recorder...")
+                    self.recorder = Recorder()
                 self.is_recording = True
                 self.recorder.start()
             else:
                 # Stop recording (works around lost key release events)
                 log("⚙️  Hotkey pressed again - stopping recording")
                 self.is_recording = False
-                sound("Blow")  # Play sound immediately so user knows it stopped
 
                 # Dispose of recorder and process in background
                 old_recorder = self.recorder
@@ -599,6 +660,7 @@ class DictationListener:
                     try:
                         if old_recorder:
                             audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
+                            sound("Blow", blocking=False)  # Play after recording stops
                             if audio_bytes:
                                 self._process_audio(audio_bytes)
                     except Exception as e:
@@ -611,7 +673,6 @@ class DictationListener:
 
         if self.is_recording and key == HOTKEY_KEY:
             self.is_recording = False
-            sound("Blow")  # Play sound immediately so user knows it stopped
 
             # Dispose of recorder and process in background
             old_recorder = self.recorder
@@ -621,6 +682,7 @@ class DictationListener:
                 try:
                     if old_recorder:
                         audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
+                        sound("Blow", blocking=False)  # Play after recording stops
                         if audio_bytes:
                             self._process_audio(audio_bytes)
                 except Exception as e:
@@ -629,9 +691,11 @@ class DictationListener:
             threading.Thread(target=stop_and_process, daemon=True).start()
 
     def _process_audio(self, audio_bytes: bytes):
-        text = transcribe(audio_bytes)
+        text = transcribe(audio_bytes).strip()
         if text:
             paste_text(text)
+        # Pre-spawn next standby recorder so it's ready for the next recording
+        self._prepare_standby()
 
     def reset(self, reason="Manual (Ctrl+Shift+R)", process_audio=False):
         """Reset recorder - kill subprocess and optionally process audio."""
@@ -639,13 +703,26 @@ class DictationListener:
 
         self.is_recording = False
 
-        # Dispose of the old recorder
+        # Dispose of the old recorder and standby
         old_recorder = self.recorder
-        self.recorder = None  # Next recording will create fresh instance
+        self.recorder = None
+        old_standby = self._standby_recorder
+        self._standby_recorder = None
 
         # Kill subprocess and optionally process audio in background
         def kill_and_process():
             try:
+                # Kill standby subprocess and clean up its temp file
+                if old_standby:
+                    if old_standby.process and old_standby.process.is_alive():
+                        old_standby.process.kill()
+                        old_standby.process.join(timeout=2)
+                    try:
+                        if old_standby.temp_file and os.path.exists(old_standby.temp_file.name):
+                            os.unlink(old_standby.temp_file.name)
+                    except:
+                        pass
+
                 if old_recorder:
                     if process_audio:
                         log("💾 Attempting to save stuck recording...")
@@ -653,6 +730,7 @@ class DictationListener:
                         if audio_bytes:
                             log(f"✅ Recovered {len(audio_bytes)} bytes - transcribing...")
                             self._process_audio(audio_bytes)
+                            return  # _process_audio already prepares standby
                     else:
                         # Just kill it without processing
                         if old_recorder.process and old_recorder.process.is_alive():
@@ -660,6 +738,9 @@ class DictationListener:
                             old_recorder.process.join()
             except Exception as e:
                 log(f"⚠️  Error during reset: {e}")
+
+            # Prepare fresh standby
+            self._prepare_standby()
 
         threading.Thread(target=kill_and_process, daemon=True).start()
 
