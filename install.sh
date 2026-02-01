@@ -25,7 +25,7 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 # Check for Python 3
-echo -e "${YELLOW}[1/6] Checking requirements...${NC}"
+echo -e "${YELLOW}[1/7] Checking requirements...${NC}"
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}Error: Python 3 is required but not installed.${NC}"
     echo "Install it from https://www.python.org or via Homebrew: brew install python"
@@ -37,7 +37,7 @@ echo -e "  ${GREEN}✓${NC} Python $PYTHON_VERSION found"
 
 # Create virtual environment
 echo ""
-echo -e "${YELLOW}[2/6] Setting up Python environment...${NC}"
+echo -e "${YELLOW}[2/7] Setting up Python environment...${NC}"
 if [ ! -d "venv" ]; then
     python3 -m venv venv
     echo -e "  ${GREEN}✓${NC} Created virtual environment"
@@ -53,7 +53,7 @@ echo -e "  ${GREEN}✓${NC} Installed dependencies"
 
 # Setup .env file
 echo ""
-echo -e "${YELLOW}[3/6] Configuring API key...${NC}"
+echo -e "${YELLOW}[3/7] Configuring API key...${NC}"
 if [ ! -f ".env" ]; then
     cp .env.example .env
 
@@ -67,11 +67,11 @@ if [ ! -f ".env" ]; then
     read -p "Paste your Groq API key here (or press Enter to add later): " GROQ_KEY
 
     if [ -n "$GROQ_KEY" ]; then
-        # Use sed to replace the placeholder
+        # Use sed to replace the placeholder (| delimiter avoids issues with special chars in key)
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/gsk_your_key_here/$GROQ_KEY/" .env
+            sed -i '' "s|gsk_your_key_here|$GROQ_KEY|" .env
         else
-            sed -i "s/gsk_your_key_here/$GROQ_KEY/" .env
+            sed -i "s|gsk_your_key_here|$GROQ_KEY|" .env
         fi
         echo -e "  ${GREEN}✓${NC} API key saved to .env"
     else
@@ -84,7 +84,7 @@ fi
 
 # macOS permissions reminder
 echo ""
-echo -e "${YELLOW}[4/6] macOS Permissions Setup...${NC}"
+echo -e "${YELLOW}[4/7] macOS Permissions Setup...${NC}"
 echo ""
 echo -e "${YELLOW}IMPORTANT: You must grant two permissions:${NC}"
 echo ""
@@ -128,7 +128,13 @@ if [[ ! "$INSTALL_LOCAL" =~ ^[Nn]$ ]]; then
             cmake -B build > /dev/null 2>&1
             cmake --build build > /dev/null 2>&1
             cd "$SCRIPT_DIR"
-            echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+            if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
+                echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
+                echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
+                echo -e "  ${YELLOW}!${NC} Continuing without local fallback..."
+            else
+                echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+            fi
         fi
     else
         echo -e "  ${BLUE}→${NC} Cloning whisper.cpp..."
@@ -140,7 +146,13 @@ if [[ ! "$INSTALL_LOCAL" =~ ^[Nn]$ ]]; then
         cmake -B build > /dev/null 2>&1
         cmake --build build > /dev/null 2>&1
         cd "$SCRIPT_DIR"
-        echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+        if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
+            echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
+            echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
+            echo -e "  ${YELLOW}!${NC} Continuing without local fallback..."
+        else
+            echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+        fi
     fi
 
     # Model selection
@@ -232,8 +244,7 @@ if [[ ! "$AUTOSTART" =~ ^[Nn]$ ]]; then
 
 # Auto-start Whisper Dictate
 if ! pgrep -f "dictate.py" > /dev/null; then
-    cd ~/whisper-dictate && source venv/bin/activate && \
-    nohup python dictate.py >> ~/whisper-dictate.log 2>&1 & \
+    (cd ~/whisper-dictate && ./venv/bin/python dictate.py >> ~/whisper-dictate.log 2>&1 &)
     echo "🎤 Whisper Dictate started in background"
 fi
 EOF
