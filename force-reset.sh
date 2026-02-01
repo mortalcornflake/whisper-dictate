@@ -1,6 +1,6 @@
 #!/bin/bash
 # Force reset Whisper Dictate if stuck recording
-# This tries to reset WITHOUT killing the process
+# Sends SIGUSR1 to trigger reset WITHOUT killing the process
 
 echo "🔥 Force resetting Whisper Dictate..."
 
@@ -13,22 +13,13 @@ if [ -z "$PID" ]; then
 fi
 
 echo "Found dictate.py process: $PID"
-echo ""
-echo "Trying reset methods..."
-echo ""
 
-# Method 1: Send SIGUSR1 signal
-echo "1. Sending SIGUSR1 signal..."
+# Send SIGUSR1 to trigger reset handler
+echo "Sending SIGUSR1 reset signal..."
 kill -USR1 $PID
-sleep 1
-
-# Method 2: Delete trigger file
-echo "2. Deleting reset trigger file..."
-rm -f ~/.whisper-dictate-reset
-sleep 1
 
 echo ""
-echo "✅ Reset signals sent!"
+echo "✅ Reset signal sent!"
 echo "Check ~/whisper-dictate.log to verify reset occurred"
 echo ""
 echo "If still stuck, use: ~/whisper-dictate/restart-dictate.sh"

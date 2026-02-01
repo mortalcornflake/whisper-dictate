@@ -125,9 +125,12 @@ _whisper_server_lock = threading.Lock()
 
 def notify(title, message):
     """Show macOS notification."""
+    # Escape backslashes and double quotes for AppleScript string literals
+    safe_title = title.replace('\\', '\\\\').replace('"', '\\"')
+    safe_message = message.replace('\\', '\\\\').replace('"', '\\"')
     subprocess.run([
         "osascript", "-e",
-        f'display notification "{message}" with title "{title}"'
+        f'display notification "{safe_message}" with title "{safe_title}"'
     ], capture_output=True)
 
 
@@ -330,21 +333,20 @@ def transcribe_groq(audio_bytes: bytes) -> str:
 
 
 def transcribe_openai(audio_bytes: bytes) -> str:
-    """Transcribe using OpenAI Whisper API."""
+    """Transcribe using OpenAI Whisper API. Raises on error for fallback."""
     if not OPENAI_API_KEY:
-        log("❌ OPENAI_API_KEY not set")
-        return ""
+        raise ValueError("OPENAI_API_KEY not set")
 
     response = requests.post(
         "https://api.openai.com/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
         files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-        data={"model": "whisper-1"}
+        data={"model": "whisper-1"},
+        timeout=30
     )
 
     if response.status_code != 200:
-        log(f"❌ OpenAI API error: {response.text}")
-        return ""
+        raise RuntimeError(f"OpenAI API error: {response.status_code}")
 
     return response.json().get("text", "")
 
@@ -599,6 +601,7 @@ class DictationListener:
         self.is_recording = False
         self.pressed_keys = set()
         self._standby_recorder = None
+        self._last_hotkey_time = 0  # Debounce key-repeat
         self._start_auto_reset_checker()
         self._prepare_standby()
 
@@ -637,6 +640,12 @@ class DictationListener:
 
         # Toggle recording: press to start, press again to stop
         if key == HOTKEY_KEY:
+            # Debounce key-repeat events (ignore presses within 0.5s)
+            now = time.time()
+            if now - self._last_hotkey_time < 0.5:
+                return
+            self._last_hotkey_time = now
+
             if not self.is_recording:
                 # Use pre-spawned standby recorder, or create fresh if none available
                 if self._standby_recorder:
@@ -650,45 +659,33 @@ class DictationListener:
             else:
                 # Stop recording (works around lost key release events)
                 log("⚙️  Hotkey pressed again - stopping recording")
-                self.is_recording = False
-
-                # Dispose of recorder and process in background
-                old_recorder = self.recorder
-                self.recorder = None  # DISPOSE - never reuse
-
-                def stop_and_process():
-                    try:
-                        if old_recorder:
-                            audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
-                            sound("Blow", blocking=False)  # Play after recording stops
-                            if audio_bytes:
-                                self._process_audio(audio_bytes)
-                    except Exception as e:
-                        log(f"⚠️  Error stopping recorder: {e}")
-
-                threading.Thread(target=stop_and_process, daemon=True).start()
+                self._stop_and_process_recording()
 
     def on_release(self, key):
         self.pressed_keys.discard(key)
 
         if self.is_recording and key == HOTKEY_KEY:
-            self.is_recording = False
+            self._stop_and_process_recording()
 
-            # Dispose of recorder and process in background
-            old_recorder = self.recorder
-            self.recorder = None  # DISPOSE - never reuse
+    def _stop_and_process_recording(self):
+        """Stop current recording and transcribe in background."""
+        self.is_recording = False
 
-            def stop_and_process():
-                try:
-                    if old_recorder:
-                        audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
-                        sound("Blow", blocking=False)  # Play after recording stops
-                        if audio_bytes:
-                            self._process_audio(audio_bytes)
-                except Exception as e:
-                    log(f"⚠️  Error stopping recorder: {e}")
+        # Dispose of recorder and process in background
+        old_recorder = self.recorder
+        self.recorder = None  # DISPOSE - never reuse
 
-            threading.Thread(target=stop_and_process, daemon=True).start()
+        def stop_and_process():
+            try:
+                if old_recorder:
+                    audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
+                    sound("Blow", blocking=False)  # Play after recording stops
+                    if audio_bytes:
+                        self._process_audio(audio_bytes)
+            except Exception as e:
+                log(f"⚠️  Error stopping recorder: {e}")
+
+        threading.Thread(target=stop_and_process, daemon=True).start()
 
     def _process_audio(self, audio_bytes: bytes):
         text = transcribe(audio_bytes).strip()
@@ -752,14 +749,14 @@ class DictationListener:
         """Periodically check if recording has been stuck for way too long."""
         while True:
             time.sleep(5)  # Check every 5 seconds
-            if self.is_recording and self.recorder and self.recorder.start_time:
-                elapsed = time.time() - self.recorder.start_time
+            # Capture local references to avoid torn state from other threads
+            recorder = self.recorder
+            if self.is_recording and recorder and recorder.start_time:
+                elapsed = time.time() - recorder.start_time
 
                 # Auto-reset and process the audio if stuck
                 if elapsed > AUTO_STOP_TIMEOUT:
                     log(f"⚠️  Recording stuck for {int(elapsed)}s - forcing reset and transcribing")
-                    # Play stop sound immediately so user knows recording stopped
-                    sound("Blow")
                     self.reset(reason=f"Auto-reset after {int(elapsed)} seconds", process_audio=True)
 
     def _start_auto_reset_checker(self):
@@ -828,6 +825,13 @@ def main():
         start_whisper_server()
 
     listener = DictationListener()
+
+    # Register SIGUSR1 handler for external reset (force-reset.sh)
+    def sigusr1_handler(signum, frame):
+        log("🔄 SIGUSR1 received - resetting recorder")
+        listener.reset(reason="SIGUSR1 signal")
+    signal.signal(signal.SIGUSR1, sigusr1_handler)
+
     try:
         listener.run()
     except KeyboardInterrupt:

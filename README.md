@@ -326,7 +326,7 @@ If stuck in recording mode, try these in order:
 1. **Tap the hotkey again** (Right Option) - toggle mode will stop it
 2. **Ctrl+Shift+R** - keyboard-based reset
 3. **`~/whisper-dictate/force-reset.sh`** - external reset via signals (doesn't kill the process)
-4. **Wait 5 minutes** - automatic safety reset kicks in
+4. **Wait 45 seconds** - automatic safety reset kicks in (configurable via `AUTO_STOP_TIMEOUT`)
 5. **`~/whisper-dictate/restart-dictate.sh`** - full restart (kills and restarts the process)
 
 Other issues:
@@ -400,8 +400,6 @@ More than enough for personal dictation.
 
 See [ROADMAP.md](ROADMAP.md) for planned features:
 - Menu bar UI with recording status indicator
-- Clipboard preservation (save/restore previous clipboard)
-- Configurable hotkey via `.env` (no code editing)
 - Language selection (Whisper supports 99 languages)
 - LLM transcript cleanup (remove filler words, fix punctuation)
 - Context-aware formatting per app
