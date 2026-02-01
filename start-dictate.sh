@@ -5,7 +5,7 @@
 sleep 3
 
 # Check if already running
-if pgrep -f "dictate.py" > /dev/null; then
+if pgrep -f "[Pp]ython.*dictate.py" > /dev/null; then
     echo "Whisper Dictate already running"
     exit 0
 fi
