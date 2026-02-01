@@ -175,14 +175,20 @@ def recording_worker(output_path, device_name, sample_rate, channels, ready_even
     signal.signal(signal.SIGINT, signal_handler)
 
     # Start recording
-    stream = sd.InputStream(
-        samplerate=sample_rate,
-        channels=channels,
-        dtype=np.int16,
-        device=device_name,
-        callback=callback
-    )
-    stream.start()
+    try:
+        stream = sd.InputStream(
+            samplerate=sample_rate,
+            channels=channels,
+            dtype=np.int16,
+            device=device_name,
+            callback=callback
+        )
+        stream.start()
+    except Exception as e:
+        print(f"Audio device error: {e}", file=sys.stderr)
+        sys.stderr.flush()
+        ready_event.set()  # Unblock parent so it doesn't hang
+        return
 
     # Signal parent that audio stream is active
     ready_event.set()
@@ -220,7 +226,7 @@ def trim_trailing_silence(audio_data, sample_rate=16000, threshold=300, buffer_s
     abs_audio = np.abs(audio_data.flatten())
     above = np.where(abs_audio > threshold)[0]
     if len(above) == 0:
-        return audio_data  # All silence - return as-is
+        return audio_data[:0]  # All silence - return empty to skip transcription
     last_speech = above[-1]
     buffer_samples = int(buffer_secs * sample_rate)
     end = min(last_speech + buffer_samples, len(audio_data))
@@ -378,9 +384,8 @@ def start_whisper_server():
 
         _whisper_server_process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
 
         # Wait for server to be ready (check if port is listening)
@@ -431,23 +436,20 @@ def stop_whisper_server():
 
 def check_server_idle():
     """Background thread to shutdown idle server."""
-    global _whisper_server_last_used
-
     while True:
         time.sleep(60)  # Check every minute
 
-        # Use lock to safely read server state
+        # Decide under lock, act outside lock (stop_whisper_server acquires its own lock)
+        should_stop = False
         with _whisper_server_lock:
             if _whisper_server_process and _whisper_server_last_used:
                 idle_time = time.time() - _whisper_server_last_used
                 if idle_time > WHISPER_SERVER_IDLE_TIMEOUT:
                     log(f"💤 Whisper server idle for {int(idle_time/60)}min - shutting down")
+                    should_stop = True
 
-        # Call stop outside the lock to avoid deadlock
-        if _whisper_server_process and _whisper_server_last_used:
-            idle_time = time.time() - _whisper_server_last_used
-            if idle_time > WHISPER_SERVER_IDLE_TIMEOUT:
-                stop_whisper_server()
+        if should_stop:
+            stop_whisper_server()
 
 
 def transcribe_local(audio_bytes: bytes) -> str:
@@ -495,7 +497,7 @@ def transcribe_local(audio_bytes: bytes) -> str:
             cmd.extend(["-m", WHISPER_MODEL_PATH])
         cmd.extend(["-f", temp_path, "--no-timestamps", "--best-of", "5", "--beam-size", "5", "--language", "en"])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         return result.stdout.strip()
     finally:
         os.unlink(temp_path)
@@ -601,18 +603,23 @@ class DictationListener:
         self.is_recording = False
         self.pressed_keys = set()
         self._standby_recorder = None
+        self._standby_lock = threading.Lock()
         self._last_hotkey_time = 0  # Debounce key-repeat
         self._start_auto_reset_checker()
         self._prepare_standby()
 
     def _prepare_standby(self):
         """Pre-spawn a subprocess so it's ready for the next recording."""
-        try:
-            self._standby_recorder = Recorder()
-            log("🔄 Standby recorder ready")
-        except Exception as e:
-            log(f"⚠️  Failed to prepare standby recorder: {e}")
-            self._standby_recorder = None
+        with self._standby_lock:
+            # Don't spawn if one already exists
+            if self._standby_recorder is not None:
+                return
+            try:
+                self._standby_recorder = Recorder()
+                log("🔄 Standby recorder ready")
+            except Exception as e:
+                log(f"⚠️  Failed to prepare standby recorder: {e}")
+                self._standby_recorder = None
 
     def on_press(self, key):
         self.pressed_keys.add(key)

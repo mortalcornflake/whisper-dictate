@@ -5,7 +5,7 @@
 echo "🔥 Force resetting Whisper Dictate..."
 
 # Find the dictate.py process
-PID=$(pgrep -f "dictate.py")
+PID=$(pgrep -f "[Pp]ython.*dictate.py")
 
 if [ -z "$PID" ]; then
     echo "❌ dictate.py is not running"

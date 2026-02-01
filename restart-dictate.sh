@@ -2,7 +2,7 @@
 # Restart Whisper Dictate - use this if it gets stuck recording
 
 echo "Stopping dictate.py..."
-pkill -f "dictate.py"
+pkill -f "[Pp]ython.*dictate.py"
 
 sleep 1
 
@@ -13,7 +13,7 @@ nohup python dictate.py >> ~/whisper-dictate.log 2>&1 &
 
 sleep 2
 
-if pgrep -f "dictate.py" > /dev/null; then
+if pgrep -f "[Pp]ython.*dictate.py" > /dev/null; then
     echo "✅ Whisper Dictate restarted successfully"
 else
     echo "❌ Failed to restart - check ~/whisper-dictate.log"
