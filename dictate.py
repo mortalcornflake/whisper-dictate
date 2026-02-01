@@ -85,7 +85,8 @@ HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
-AUTO_STOP_TIMEOUT = int(os.environ.get("AUTO_STOP_TIMEOUT", "45"))  # Seconds before auto-stop stuck recordings
+AUTO_STOP_TIMEOUT = int(os.environ.get("AUTO_STOP_TIMEOUT", "300"))  # Seconds before auto-stop stuck recordings
+AUTO_STOP_WARNING = 10  # Seconds before auto-stop to play warning sound
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 
@@ -662,6 +663,7 @@ class DictationListener:
                     log("🎙️  No standby ready, spawning new recorder...")
                     self.recorder = Recorder()
                 self.is_recording = True
+                self._warning_played = False
                 self.recorder.start()
             else:
                 # Stop recording (works around lost key release events)
@@ -761,9 +763,17 @@ class DictationListener:
             if self.is_recording and recorder and recorder.start_time:
                 elapsed = time.time() - recorder.start_time
 
+                # Warning sound before auto-stop
+                warning_at = AUTO_STOP_TIMEOUT - AUTO_STOP_WARNING
+                if not getattr(self, '_warning_played', False) and elapsed > warning_at:
+                    self._warning_played = True
+                    sound("Sosumi", blocking=False)
+                    log(f"⚠️  Recording approaching limit ({AUTO_STOP_WARNING}s remaining)")
+
                 # Auto-reset and process the audio if stuck
                 if elapsed > AUTO_STOP_TIMEOUT:
-                    log(f"⚠️  Recording stuck for {int(elapsed)}s - forcing reset and transcribing")
+                    self._warning_played = False
+                    log(f"⚠️  Recording exceeded {AUTO_STOP_TIMEOUT}s - auto-stopping and transcribing")
                     self.reset(reason=f"Auto-reset after {int(elapsed)} seconds", process_audio=True)
 
     def _start_auto_reset_checker(self):
