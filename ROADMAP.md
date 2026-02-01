@@ -4,9 +4,9 @@
 - Configurable hotkey via .env (default: Right Option key)
 - Transcribe via Groq Whisper API (fast, free tier)
 - Automatic fallback to local whisper.cpp if offline/rate-limited
-- Sound feedback (Pop/Blow/Glass)
+- Sound feedback (Tink/Blow/Glass)
 - Clipboard preservation (your clipboard is restored after pasting)
-- Ctrl+Shift+R manual reset + 5-minute auto-reset safety net
+- Ctrl+Shift+R manual reset + 45-second auto-reset safety net
 - Manual startup via Terminal (permissions work reliably)
 
 ---
@@ -129,7 +129,7 @@ Replace background process with proper menu bar app:
 - See recent transcriptions
 - Quick access to settings
 
-Libraries: `rumps` (simple) or `pyobjc` AppKit (full control)
+Libraries: `rumps` or `pyobjc` AppKit (full control)
 
 ### Voice Commands
 Prefix phrases that trigger actions:
@@ -156,7 +156,7 @@ Option to auto-detect speech start/stop instead of holding key:
 ## Technical Debt
 - [x] Suppress urllib3 SSL warning properly
 - [x] Improve Ctrl+Shift+R reset reliability (stops recorder.recording flag)
-- [x] Add auto-reset safety timeout (5 minutes)
+- [x] Add auto-reset safety timeout (45 seconds, configurable)
 - [x] Move imports to top of file (code cleanup)
 - [x] Configurable hotkey via .env
 - [ ] Better error handling for malformed audio

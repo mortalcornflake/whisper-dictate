@@ -90,8 +90,8 @@ The app uses **lazy server initialization** with automatic cleanup:
 
 ### 1. Thread Safety
 - ✅ `_whisper_server_lock` protects all server state access
-- ✅ Idle checker uses lock to avoid race conditions
-- ✅ No deadlocks (stop_whisper_server called outside lock)
+- ✅ Idle checker captures decision under lock, acts outside lock
+- ✅ No deadlocks (stop_whisper_server acquires its own lock)
 
 ### 2. Process Lifecycle Management
 - ✅ Startup: Health check with 30sec timeout
