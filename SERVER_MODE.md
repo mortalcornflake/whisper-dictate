@@ -81,8 +81,10 @@ The app uses **lazy server initialization** with automatic cleanup:
 3. **Next app start**: Tries to start server → port conflict → falls back to CLI
 4. **Manual cleanup**: User runs `pkill -f whisper-server` or `lsof -ti:8080 | xargs kill`
 
-**Result**: ⚠️ Known limitation - orphaned processes require manual cleanup
+**Result**: ⚠️ Known limitation - orphaned whisper-server requires manual cleanup
 **Mitigation**: Use Ctrl+C for clean exits (documented in README)
+
+> **Note**: Recorder subprocess orphans (separate from whisper-server) are now handled automatically via atexit/SIGTERM handlers and parent-death detection in the recording worker. `restart-dictate.sh` also kills orphaned multiprocessing children as a safety net.
 
 ---
 
