@@ -3,8 +3,10 @@
 
 echo "Stopping dictate.py..."
 pkill -f "[Pp]ython.*dictate.py"
-
 sleep 1
+# Kill any orphaned multiprocessing children (standby recorders)
+pkill -f "multiprocessing.spawn"
+sleep 0.5
 
 echo "Starting dictate.py..."
 cd ~/whisper-dictate
