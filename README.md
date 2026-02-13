@@ -282,7 +282,7 @@ python dictate.py
 If that doesn't work, try these in order:
 1. **Ctrl+Shift+R** - keyboard reset
 2. **`~/whisper-dictate/force-reset.sh`** - signal-based reset (doesn't kill the process)
-3. **`~/whisper-dictate/restart-dictate.sh`** - full restart (kills and restarts)
+3. **`~/whisper-dictate/restart-dictate.sh`** - full restart (kills process and orphaned subprocesses, then restarts)
 
 ### How do I restart it?
 ```bash
