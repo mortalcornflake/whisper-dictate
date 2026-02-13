@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import wave
+import atexit
 import tempfile
 import threading
 import subprocess
@@ -123,6 +124,24 @@ _whisper_server_process = None
 _whisper_server_last_used = None
 _whisper_server_lock = threading.Lock()
 
+# Track all spawned recorder subprocesses for cleanup on exit
+_all_recorder_processes = []
+_all_recorder_processes_lock = threading.Lock()
+
+
+def _cleanup_all_subprocesses():
+    """Kill all tracked recorder subprocesses. Called on exit."""
+    with _all_recorder_processes_lock:
+        for proc in _all_recorder_processes:
+            try:
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=2)
+            except:
+                pass
+        _all_recorder_processes.clear()
+    stop_whisper_server()
+
 
 def notify(title, message):
     """Show macOS notification."""
@@ -154,8 +173,12 @@ def recording_worker(output_path, device_name, sample_rate, channels, ready_even
     import signal
     import sys
 
-    # Wait for parent to signal us to start recording
-    go_event.wait()
+    # Wait for parent to signal us to start recording.
+    # Use timeout loop to detect parent death (orphan protection).
+    parent_pid = os.getppid()
+    while not go_event.wait(timeout=5):
+        if os.getppid() != parent_pid:
+            sys.exit(0)
 
     frames = []
     recording = True
@@ -252,6 +275,8 @@ class Recorder:
                   self.ready_event, self.go_event)
         )
         self.process.start()
+        with _all_recorder_processes_lock:
+            _all_recorder_processes.append(self.process)
 
     def start(self):
         self.start_time = time.time()
@@ -285,6 +310,10 @@ class Recorder:
                 log("💀 Force killing stuck subprocess...")
                 self.process.kill()  # SIGKILL - nuclear option
                 self.process.join(timeout=2)
+
+        with _all_recorder_processes_lock:
+            if self.process in _all_recorder_processes:
+                _all_recorder_processes.remove(self.process)
 
         # Give subprocess a moment to finish writing file
         time.sleep(0.1)
@@ -841,6 +870,15 @@ def main():
     if BACKEND == "local":
         start_whisper_server()
 
+    # Register cleanup for all exit paths
+    atexit.register(_cleanup_all_subprocesses)
+
+    def sigterm_handler(signum, frame):
+        log("\n🛑 SIGTERM received - cleaning up...")
+        _cleanup_all_subprocesses()
+        os._exit(0)
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
     listener = DictationListener()
 
     # Register SIGUSR1 handler for external reset (force-reset.sh)
@@ -853,7 +891,7 @@ def main():
         listener.run()
     except KeyboardInterrupt:
         log("\n👋 Goodbye!")
-        stop_whisper_server()  # Clean shutdown
+        _cleanup_all_subprocesses()
 
 
 if __name__ == "__main__":
