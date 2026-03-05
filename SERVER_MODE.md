@@ -3,8 +3,8 @@
 ## Architecture
 
 The app uses **lazy server initialization** with automatic cleanup:
-- **Primary**: Cloud API (Groq/OpenAI) - always tried first
-- **Fallback**: Local whisper server (persistent) OR CLI (one-shot)
+- **Default**: Local whisper server (persistent, started on launch)
+- **Optional**: Cloud API (Groq/OpenAI) with local fallback if unreachable
 - **Cleanup**: Auto-shutdown after 30min idle + graceful exit on Ctrl+C
 
 ## All User Journeys (Tested Scenarios)

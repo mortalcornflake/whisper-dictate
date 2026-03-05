@@ -6,112 +6,17 @@ None! All known issues have been resolved.
 
 ---
 
-## Previously Active Issues
-
-### ✅ RESOLVED: Ctrl+Shift+R reset doesn't actually stop recording
-
-**Status:** Active bug, needs investigation
-**Priority:** High - only workaround is kill/restart process
-
-**Symptoms:**
-- Ctrl+Shift+R combo IS detected (plays Glass sound and shows notification)
-- But recording does NOT actually stop
-- Microphone stays active, keeps recording
-- Only fix: kill process and restart
-
-**ROOT CAUSE DISCOVERED (2024-12-02):**
-- Happens during LONG dictations (30+ seconds)
-- Occurs when Claude Code session is actively outputting to terminal
-- Terminal is scrolling/updating heavily while user holds hotkey
-- **Theory:** macOS drops the key RELEASE event when terminal is busy
-- pynput never receives the release event
-- Recorder waits forever for a release that never comes
-- Reset doesn't help because the recorder is "working correctly" - it just never got the stop signal
-
-**What we know:**
-- `reset()` function IS being called (confirmed by sound + notification)
-- Sound plays = code reaches `sound("Glass")` at end of reset()
-- But `self.recorder.stream.stop()` and `self.recorder.recording = False` aren't working
-- Attempted fixes so far:
-  - Improved key detection logic (didn't help)
-  - Added `self.recorder.recording = False` before stream.stop() (didn't help)
-  - Added exception handling (didn't help)
-  - **2024-12-02 FIX #1:** More aggressive termination (FAILED):
-    - Added `is_resetting` flag to block new recordings during reset
-    - Changed `stream.stop()` to `stream.abort()` for immediate termination
-    - Added explicit frames buffer clear
-    - **Result:** STILL DIDN'T WORK - stream kept recording
-
-  - **2024-12-02 FIX #2:** NUCLEAR OPTION (TESTING NOW):
-    - Don't try to stop/abort/close the stream at all
-    - Just set `recorder.stream = None` and abandon it
-    - Create completely fresh Recorder immediately
-    - Attempt to kill old stream in background thread (but don't wait)
-    - If background kill fails, we don't care - stream is leaked but we've moved on
-    - This makes reset instant and non-blocking
-
-**Hypothesis:**
-- The stream can't be reliably stopped from keyboard listener thread
-- Threading issue: callback thread doesn't see flag updates in time
-- Trying to stop the stream blocks or fails silently
-- **New approach:** Just abandon the stream and create new one - nuclear but effective
-
-**Status:** 🧪 TESTING NOW - User stuck and needs to try Ctrl+Shift+R
-
-**If this doesn't work:**
-- User's suggestion: separate background script monitoring for reset hotkey
-- That script would `pkill -9 dictate.py && restart` when hotkey detected
-- Bypasses all threading/stream issues entirely
-
-**BETTER SOLUTIONS (now that we know the root cause):**
-
-Since the issue is LOST KEY RELEASE EVENTS, not broken recorder:
-
-1. **Auto-stop after max recording time** (EASY FIX):
-   - Current auto-reset is 45 seconds (configurable via AUTO_STOP_TIMEOUT)
-   - Add separate MAX_RECORDING_LENGTH = 60 seconds
-   - Auto-stop recording after 60s even without key release
-   - Prevents getting stuck on long dictations
-
-2. **Double-tap to stop** (ALTERNATE APPROACH):
-   - If hotkey pressed AGAIN while recording, stop instead of ignoring
-   - Toggle mode: press to start, press again to stop
-   - Works around lost release events entirely
-   - More reliable than waiting for release event
-
-3. **Periodic key state check**:
-   - Every 1 second, check if hotkey is physically still pressed
-   - If recording but key is no longer down, auto-stop
-   - Would catch lost release events quickly
-   - Not sure if pynput can query current key state though
-
-**Recommendation:** Try option #1 (auto-stop at 60s) - simplest fix
-
-**IMPLEMENTED (2024-12-02):**
-
-✅ **Toggle mode - press hotkey again to stop** (USER'S IDEA!)
-- Changed hotkey behavior: press to start, press again to stop
-- If recording and user presses Right Option again → stop immediately
-- Works around lost key release events perfectly
-- User has immediate control
-- **This is the fix - elegant and simple**
-
-**Status:** ✅ DEPLOYED
-- Press hotkey again = instant stop
-- 45-second auto-reset remains as emergency backup only
-
----
-
 ## Resolved Issues
 
-### ✅ Clipboard gets overwritten
-**Fixed:** Implemented clipboard preservation (optional via PRESERVE_CLIPBOARD env var)
+### ✅ Stuck recording (key release lost)
+**Problem:** macOS occasionally drops the key release event during heavy terminal output, leaving the recorder stuck.
+**Fix:** Toggle mode — press the hotkey again to stop recording. Auto-stop safety net kicks in after 5 minutes as a backup.
 
-### ✅ urllib3 SSL warning cluttering logs
-**Fixed:** Added warning filter
+### ✅ Clipboard gets overwritten
+**Fix:** Clipboard preservation — your clipboard is automatically saved and restored after pasting. Optional via `PRESERVE_CLIPBOARD` env var.
 
 ### ✅ Hotkey hardcoded in code
-**Fixed:** Made configurable via HOTKEY env var
+**Fix:** Configurable via `HOTKEY` env var in `.env`.
 
 ### ✅ App bundle permissions issues
-**Fixed:** Removed app bundle, documented Terminal-only approach
+**Fix:** Runs via Terminal directly (no app bundle needed).
