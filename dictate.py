@@ -97,7 +97,7 @@ CHANNELS = 1
 INPUT_DEVICE = os.environ.get("INPUT_DEVICE", None)  # None = system default
 
 # Transcription backend: "groq", "openai", or "local"
-BACKEND = os.environ.get("DICTATE_BACKEND", "groq")
+BACKEND = os.environ.get("DICTATE_BACKEND", "local")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -113,7 +113,7 @@ WHISPER_SERVER_PATH = os.path.expanduser(os.environ.get(
 ))
 WHISPER_MODEL_PATH = os.path.expanduser(os.environ.get(
     "WHISPER_MODEL_PATH",
-    "~/whisper.cpp/models/ggml-base.en.bin"
+    "~/whisper.cpp/models/ggml-large-v3-turbo.bin"
 ))
 FALLBACK_TO_LOCAL = os.environ.get("FALLBACK_TO_LOCAL", "true").lower() in ("true", "1", "yes")
 WHISPER_SERVER_PORT = 8080  # Port for whisper server
@@ -836,8 +836,21 @@ def main():
     # Set multiprocessing start method for macOS
     multiprocessing.set_start_method('spawn', force=True)
 
-    # Check for required API keys based on backend
-    if BACKEND == "groq" and not GROQ_API_KEY:
+    # Check for required configuration based on backend
+    if BACKEND == "local":
+        # Local mode: just verify whisper.cpp paths exist
+        if not os.path.exists(WHISPER_CPP_PATH):
+            log(f"❌ whisper.cpp CLI not found at: {WHISPER_CPP_PATH}")
+            log(f"   Run install.sh to set up local transcription")
+            sys.exit(1)
+        if not os.path.exists(WHISPER_SERVER_PATH):
+            log(f"⚠️  whisper-server not found at: {WHISPER_SERVER_PATH}")
+            log(f"   Server mode disabled, will use CLI only (slower)")
+        if not os.path.exists(WHISPER_MODEL_PATH):
+            log(f"❌ Whisper model not found at: {WHISPER_MODEL_PATH}")
+            log(f"   Run install.sh to download a model")
+            sys.exit(1)
+    elif BACKEND == "groq" and not GROQ_API_KEY:
         if FALLBACK_TO_LOCAL:
             log("⚠️  GROQ_API_KEY not set - will use local whisper.cpp only")
         else:
@@ -850,17 +863,14 @@ def main():
             log("⚠️  OPENAI_API_KEY not set.")
             sys.exit(1)
 
-    # Verify local whisper.cpp exists if we might need it
-    if FALLBACK_TO_LOCAL or BACKEND == "local":
+    # Verify local whisper.cpp exists if cloud backend has local fallback enabled
+    if FALLBACK_TO_LOCAL and BACKEND != "local":
         if not os.path.exists(WHISPER_CPP_PATH):
-            log(f"❌ whisper.cpp CLI not found at: {WHISPER_CPP_PATH}")
-            sys.exit(1)
-        if not os.path.exists(WHISPER_SERVER_PATH):
-            log(f"⚠️  whisper-server not found at: {WHISPER_SERVER_PATH}")
-            log(f"   Server mode disabled, will use CLI only (slower)")
-        if not os.path.exists(WHISPER_MODEL_PATH):
-            log(f"❌ Whisper model not found at: {WHISPER_MODEL_PATH}")
-            sys.exit(1)
+            log(f"⚠️  whisper.cpp CLI not found at: {WHISPER_CPP_PATH}")
+            log(f"   Local fallback disabled (cloud-only mode)")
+        elif not os.path.exists(WHISPER_MODEL_PATH):
+            log(f"⚠️  Whisper model not found at: {WHISPER_MODEL_PATH}")
+            log(f"   Local fallback disabled (cloud-only mode)")
 
     # Start idle checker thread for whisper server cleanup
     idle_checker = threading.Thread(target=check_server_idle, daemon=True)
