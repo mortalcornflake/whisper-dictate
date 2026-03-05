@@ -15,21 +15,21 @@ TODO: Add demo GIF here
 
 macOS's built-in dictation is... fine. But if you want:
 
-- **Better accuracy** - Uses OpenAI's Whisper Large v3 (the best Whisper model)
-- **Faster results** - ~2 second turnaround via Groq's LPU-accelerated API
-- **Actually free** - Groq's free tier gives you 8 hours of audio/day (vs OpenAI's $0.006/min)
-- **Smart fallback** - Automatically switches to local when offline (persistent server mode)
+- **No API keys needed** - Works out of the box, 100% local
+- **Completely private** - Your voice never leaves your Mac
+- **Works offline** - No internet required after setup
+- **Better accuracy** - Uses OpenAI's Whisper Large v3 Turbo model
+- **Actually free** - Runs on your hardware, no subscriptions or usage limits
 - **No training** - Works great out of the box, no "learning your voice"
-- **Privacy option** - Run 100% locally if you prefer
 - **Technical terms** - Excellent accuracy on code, APIs, technical jargon
 
 ### How it compares
 
 | Solution | Model | Speed | Cost | Setup |
 |----------|-------|-------|------|-------|
-| **Whisper Dictate (Groq)** | Large v3 | ~2s | Free | Just an API key |
+| **Whisper Dictate (local)** | Large v3 Turbo | ~3-5s | Free | Clone + install.sh |
+| Whisper Dictate (Groq cloud) | Large v3 | ~2s | Free | API key (optional upgrade) |
 | OpenAI Whisper API | Large v3 | ~3-5s | $0.006/min | API key + payment |
-| Local Whisper (server) | Large v3 Turbo | ~3-5s | Free | Download 1.5GB model |
 | Local Whisper (CLI) | Base/Small | 5-15s | Free | Download 141-466MB |
 | macOS Dictation | Apple | ~2s | Free | Built-in (less accurate) |
 
@@ -63,12 +63,13 @@ cd whisper-dictate
 
 The installer will:
 1. Check Python is installed (install from [python.org](https://www.python.org) if needed)
-2. Set up Python environment
-3. Install dependencies
-4. Help you get a FREE Groq API key
-5. Guide you through macOS permissions
-6. **Optionally install whisper.cpp for local fallback** (clones, builds, downloads model)
-7. Optionally set up auto-start
+2. Set up Python environment and dependencies
+3. **Build whisper.cpp and download the V3 Turbo model** (the core transcription engine)
+4. Guide you through macOS permissions
+5. Optionally set up a Groq API key for cloud-accelerated transcription
+6. Optionally set up auto-start
+
+**That's it — no accounts, no API keys, no sign-ups.** Just clone, install, and start dictating.
 
 ## Manual Installation
 
@@ -86,16 +87,27 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure API key
+### 2. Install whisper.cpp (local transcription engine)
 
-Get a free API key from [console.groq.com](https://console.groq.com), then:
+```bash
+git clone https://github.com/ggerganov/whisper.cpp ~/whisper.cpp
+cd ~/whisper.cpp
+cmake -B build
+cmake --build build
+
+# Download the V3 Turbo model (best accuracy, 1.5GB)
+cd models
+./download-ggml-model.sh large-v3-turbo
+```
+
+### 3. Configure
 
 ```bash
 cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
+# That's it — local mode is the default, no API keys needed
 ```
 
-### 3. Grant macOS permissions
+### 4. Grant macOS permissions
 
 **Accessibility** (required for keyboard monitoring):
 1. System Settings > Privacy & Security > Accessibility
@@ -106,7 +118,7 @@ cp .env.example .env
 1. System Settings > Privacy & Security > Microphone
 2. Toggle ON when prompted on first run
 
-### 4. Run it
+### 5. Run it
 
 ```bash
 source venv/bin/activate && python dictate.py
@@ -140,8 +152,8 @@ That's it. The transcribed text is automatically pasted wherever your cursor is.
 All settings can be configured via environment variables in `.env`:
 
 ```bash
-# Required: Groq API key (free at console.groq.com)
-GROQ_API_KEY=gsk_your_key_here
+# Local transcription is the default — no API keys needed!
+# The installer configures whisper.cpp paths automatically.
 
 # Optional: Change hotkey (default: alt_r = Right Option)
 # HOTKEY=alt_r  # Options: alt_r, alt_l, ctrl_r, ctrl_l, cmd_r, cmd_l, f5, f6, f7, f8, f9, f10
@@ -155,18 +167,8 @@ GROQ_API_KEY=gsk_your_key_here
 # Optional: Auto-stop timeout in seconds (default: 45)
 # AUTO_STOP_TIMEOUT=45  # Auto-stop and transcribe stuck recordings after 45s
 
-# Optional: Use OpenAI instead of Groq
-# OPENAI_API_KEY=sk-your_key_here
-# DICTATE_BACKEND=openai
-
-# Optional: Enable/disable local fallback (default: true)
-# Set to false if you don't have whisper.cpp installed
-# FALLBACK_TO_LOCAL=true
-
-# Optional: Local whisper.cpp paths (configured automatically by installer)
-# WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
-# WHISPER_SERVER_PATH=~/whisper.cpp/build/bin/whisper-server
-# WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-large-v3-turbo.bin
+# Optional: Pin to specific microphone
+# INPUT_DEVICE=MacBook Pro Microphone
 ```
 
 ### Changing the microphone
@@ -187,53 +189,51 @@ python3 -c "import sounddevice; print(sounddevice.query_devices())"
 
 Common device names: `MacBook Pro Microphone`, `iMac Microphone`, `USB Microphone`
 
-## Offline Mode with whisper.cpp
+## Want Even Faster Results? (Optional)
 
-**Recommended: Use the installer** - it handles everything automatically:
-```bash
-./install.sh
-# When prompted "Install local fallback support?", answer Y
-# Choose model: 1=base.en (fast), 2=small.en (balanced), 3=large-v3-turbo (best)
-```
+Local transcription takes ~3-5 seconds on Apple Silicon. If you want ~2 second turnaround, you can optionally add cloud transcription via Groq's free API:
 
-**Manual setup** (if you prefer):
+1. Get a free API key at [console.groq.com](https://console.groq.com)
+2. Add to your `.env`:
+   ```bash
+   GROQ_API_KEY=gsk_your_key_here
+   DICTATE_BACKEND=groq
+   ```
 
-```bash
-# Install whisper.cpp
-git clone https://github.com/ggerganov/whisper.cpp
-cd whisper.cpp
-cmake -B build
-cmake --build build
+**Groq free tier limits** (more than enough for personal use):
 
-# Download a model (choose based on speed vs accuracy)
-cd models
-./download-ggml-model.sh base.en        # Fast (141MB)
-./download-ggml-model.sh small.en       # Balanced (466MB)
-./download-ggml-model.sh large-v3-turbo # Best accuracy (1.5GB)
+| Limit | Amount |
+|-------|--------|
+| Requests/minute | 20 |
+| Requests/day | 2,000 |
+| Audio/hour | 7,200 sec (2 hrs) |
+| Audio/day | 28,800 sec (8 hrs) |
 
-# Add to your .env
-FALLBACK_TO_LOCAL=true
-WHISPER_CPP_PATH=~/whisper.cpp/build/bin/whisper-cli
-WHISPER_SERVER_PATH=~/whisper.cpp/build/bin/whisper-server
-WHISPER_MODEL_PATH=~/whisper.cpp/models/ggml-large-v3-turbo.bin
+When using Groq, the app automatically falls back to local transcription if the API is unreachable (offline, rate limited, etc).
 
-# Optional: Use local-only mode (no cloud API)
-DICTATE_BACKEND=local
-```
+You can also use OpenAI's API (`DICTATE_BACKEND=openai`) but it's paid ($0.006/min).
 
-### Local Fallback with Server Mode
+## Local Transcription Details
 
-When Groq fails (no WiFi, rate limited, VPN blocking), the app automatically:
-1. **First fallback**: Starts whisper-server in background (~5-10sec to load model)
-2. **Subsequent fallbacks**: Uses existing server (instant transcription)
+### Server Mode (automatic)
+
+When you use local transcription, the app automatically manages a whisper server for fast response:
+
+1. **First transcription**: Starts whisper-server in background (~5-10sec to load model)
+2. **Subsequent transcriptions**: Uses existing server (instant)
 3. **Auto-cleanup**: Shuts down server after 30 min idle (frees 1.5GB RAM)
 
 See [SERVER_MODE.md](SERVER_MODE.md) for detailed architecture and all failure scenarios.
 
-**Model recommendations:**
-- **large-v3-turbo**: Best accuracy, ~3-5s transcription (recommended)
-- **small.en**: Good balance, ~2-3s transcription
-- **base.en**: Fast but less accurate on technical terms
+### Model options
+
+The installer lets you choose your model:
+
+- **large-v3-turbo** (default): Best accuracy, ~3-5s transcription, 1.5GB download
+- **small.en**: Good balance, ~2-3s transcription, 466MB
+- **base.en**: Fast but less accurate on technical terms, 141MB
+
+Apple Silicon Macs (M1/M2/M3/M4) handle the large-v3-turbo model easily — it's the recommended choice.
 
 ## Auto-start on Login
 
@@ -292,7 +292,6 @@ If that doesn't work, try these in order:
 ### Not recording / no dictation?
 1. Check Terminal has **Microphone** permission (System Settings > Privacy & Security > Microphone)
 2. Check Terminal has **Accessibility** permission (System Settings > Privacy & Security > Accessibility)
-3. Make sure you added your Groq API key to `.env`
 
 ### Where are the logs?
 ```bash
@@ -361,8 +360,9 @@ Recording was too short or mostly silence. Hold the key longer and speak clearly
 <details>
 <summary><b>Slow transcription</b></summary>
 
+- Local: The first transcription after startup takes ~5-10s (loading model). Subsequent ones are ~3-5s.
 - Cloud: Check internet connection (~100ms latency needed)
-- Local: Use a smaller model (`base.en` instead of `large`)
+- Try a smaller model (`small.en` instead of `large-v3-turbo`) for faster local speed
 
 </details>
 
@@ -384,17 +384,6 @@ Restart if needed:
 ```
 
 </details>
-
-## Groq Free Tier Limits
-
-| Limit | Amount |
-|-------|--------|
-| Requests/minute | 20 |
-| Requests/day | 2,000 |
-| Audio/hour | 7,200 sec (2 hrs) |
-| Audio/day | 28,800 sec (8 hrs) |
-
-More than enough for personal dictation.
 
 ## Roadmap
 
@@ -428,6 +417,6 @@ MIT - see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
-- [Groq](https://groq.com) for the blazing fast, free Whisper API
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for excellent local inference
+- [Groq](https://groq.com) for the optional cloud-accelerated Whisper API
 - [pynput](https://github.com/moses-palmer/pynput) for cross-platform keyboard monitoring

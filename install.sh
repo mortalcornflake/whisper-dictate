@@ -20,7 +20,7 @@ cd "$SCRIPT_DIR"
 echo ""
 echo -e "${BLUE}╔═══════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║       Whisper Dictate Installer       ║${NC}"
-echo -e "${BLUE}║     Fast, Free Voice-to-Text          ║${NC}"
+echo -e "${BLUE}║   Private, Local Voice-to-Text        ║${NC}"
 echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
 echo ""
 
@@ -51,40 +51,118 @@ pip install -q --upgrade pip
 pip install -q -r requirements.txt
 echo -e "  ${GREEN}✓${NC} Installed dependencies"
 
-# Setup .env file
+# Local whisper.cpp setup (core transcription engine)
 echo ""
-echo -e "${YELLOW}[3/7] Configuring API key...${NC}"
+echo -e "${YELLOW}[3/7] Setting up local transcription engine...${NC}"
+echo ""
+echo -e "${BLUE}Whisper Dictate uses whisper.cpp to transcribe your voice locally on your Mac.${NC}"
+echo "No internet or API keys needed — everything runs on your hardware."
+echo ""
+
+WHISPER_DIR="$HOME/whisper.cpp"
+
+# Check if whisper.cpp already exists
+if [ -d "$WHISPER_DIR" ]; then
+    echo -e "  ${GREEN}✓${NC} whisper.cpp already exists at $WHISPER_DIR"
+
+    # Check if it's built
+    if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
+        echo -e "  ${YELLOW}!${NC} Not built yet, building now..."
+        cd "$WHISPER_DIR"
+        cmake -B build > /dev/null 2>&1
+        cmake --build build > /dev/null 2>&1
+        cd "$SCRIPT_DIR"
+        if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
+            echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
+            echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
+            echo -e "  ${YELLOW}!${NC} Continuing without local engine (will need cloud API)..."
+        else
+            echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+        fi
+    fi
+else
+    echo -e "  ${BLUE}→${NC} Cloning whisper.cpp..."
+    git clone https://github.com/ggerganov/whisper.cpp "$WHISPER_DIR" > /dev/null 2>&1
+    echo -e "  ${GREEN}✓${NC} Cloned whisper.cpp"
+
+    echo -e "  ${BLUE}→${NC} Building whisper.cpp (this may take 1-2 minutes)..."
+    cd "$WHISPER_DIR"
+    cmake -B build > /dev/null 2>&1
+    cmake --build build > /dev/null 2>&1
+    cd "$SCRIPT_DIR"
+    if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
+        echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
+        echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
+        echo -e "  ${YELLOW}!${NC} Continuing without local engine (will need cloud API)..."
+    else
+        echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+    fi
+fi
+
+# Model selection
+echo ""
+echo -e "${BLUE}Choose a transcription model:${NC}"
+echo "  1) base.en       - Fast, less accurate (141MB, ~1-2s)"
+echo "  2) small.en      - Balanced (466MB, ~2-3s)"
+echo "  3) large-v3-turbo - Best accuracy (1.5GB, ~3-5s) [RECOMMENDED]"
+echo ""
+read -p "Enter choice (1/2/3) [3]: " MODEL_CHOICE
+MODEL_CHOICE=${MODEL_CHOICE:-3}
+
+case $MODEL_CHOICE in
+    1)
+        MODEL_NAME="base.en"
+        MODEL_FILE="ggml-base.en.bin"
+        ;;
+    2)
+        MODEL_NAME="small.en"
+        MODEL_FILE="ggml-small.en.bin"
+        ;;
+    *)
+        MODEL_NAME="large-v3-turbo"
+        MODEL_FILE="ggml-large-v3-turbo.bin"
+        ;;
+esac
+
+# Download model if not exists
+if [ -f "$WHISPER_DIR/models/$MODEL_FILE" ]; then
+    echo -e "  ${GREEN}✓${NC} Model $MODEL_NAME already downloaded"
+else
+    echo -e "  ${BLUE}→${NC} Downloading $MODEL_NAME model..."
+    cd "$WHISPER_DIR/models"
+    ./download-ggml-model.sh "$MODEL_NAME" > /dev/null 2>&1
+    cd "$SCRIPT_DIR"
+    echo -e "  ${GREEN}✓${NC} Downloaded $MODEL_NAME model"
+fi
+
+# Setup .env file with local defaults
+echo ""
+echo -e "${YELLOW}[4/7] Configuring settings...${NC}"
 if [ ! -f ".env" ]; then
     cp .env.example .env
-
-    echo ""
-    echo -e "${BLUE}You need a FREE Groq API key for cloud transcription.${NC}"
-    echo -e "1. Visit: ${GREEN}https://console.groq.com${NC}"
-    echo -e "2. Sign up (free)"
-    echo -e "3. Go to API Keys section"
-    echo -e "4. Create a new key and copy it"
-    echo ""
-    read -p "Paste your Groq API key here (or press Enter to add later): " GROQ_KEY
-
-    if [ -n "$GROQ_KEY" ]; then
-        # Use sed to replace the placeholder (| delimiter avoids issues with special chars in key)
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s|gsk_your_key_here|$GROQ_KEY|" .env
-        else
-            sed -i "s|gsk_your_key_here|$GROQ_KEY|" .env
-        fi
-        echo -e "  ${GREEN}✓${NC} API key saved to .env"
-    else
-        echo -e "  ${YELLOW}!${NC} Skipped - you can add it later by editing .env"
-        echo -e "     Just replace ${BLUE}gsk_your_key_here${NC} with your actual key"
-    fi
+    echo -e "  ${GREEN}✓${NC} Created .env from template"
 else
     echo -e "  ${GREEN}✓${NC} .env file already exists"
 fi
 
+# Update .env with whisper.cpp paths
+echo -e "  ${BLUE}→${NC} Configuring local transcription paths..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s|# WHISPER_CPP_PATH=.*|WHISPER_CPP_PATH=$WHISPER_DIR/build/bin/whisper-cli|" .env
+    sed -i '' "s|# WHISPER_SERVER_PATH=.*|WHISPER_SERVER_PATH=$WHISPER_DIR/build/bin/whisper-server|" .env
+    sed -i '' "s|# WHISPER_MODEL_PATH=.*|WHISPER_MODEL_PATH=$WHISPER_DIR/models/$MODEL_FILE|" .env
+    sed -i '' "s|# FALLBACK_TO_LOCAL=.*|FALLBACK_TO_LOCAL=true|" .env
+else
+    sed -i "s|# WHISPER_CPP_PATH=.*|WHISPER_CPP_PATH=$WHISPER_DIR/build/bin/whisper-cli|" .env
+    sed -i "s|# WHISPER_SERVER_PATH=.*|WHISPER_SERVER_PATH=$WHISPER_DIR/build/bin/whisper-server|" .env
+    sed -i "s|# WHISPER_MODEL_PATH=.*|WHISPER_MODEL_PATH=$WHISPER_DIR/models/$MODEL_FILE|" .env
+    sed -i "s|# FALLBACK_TO_LOCAL=.*|FALLBACK_TO_LOCAL=true|" .env
+fi
+echo -e "  ${GREEN}✓${NC} Local transcription configured"
+
 # macOS permissions reminder
 echo ""
-echo -e "${YELLOW}[4/7] macOS Permissions Setup...${NC}"
+echo -e "${YELLOW}[5/7] macOS Permissions Setup...${NC}"
 echo ""
 echo -e "${YELLOW}IMPORTANT: You must grant two permissions:${NC}"
 echo ""
@@ -105,125 +183,45 @@ if [[ ! "$OPEN_SETTINGS" =~ ^[Nn]$ ]]; then
     read -p "Press Enter after you've added Terminal to Accessibility..."
 fi
 
-# Local fallback setup
+# Optional cloud API setup
 echo ""
-echo -e "${YELLOW}[5/7] Local Fallback Setup (optional)...${NC}"
+echo -e "${YELLOW}[6/7] Cloud Transcription (optional)...${NC}"
 echo ""
-echo -e "${BLUE}Whisper Dictate can fall back to local transcription when offline.${NC}"
-echo "This requires whisper.cpp (~10MB source) and a model (141MB-1.5GB)."
+echo -e "${BLUE}Want even faster transcription? (~2s instead of ~3-5s)${NC}"
+echo "You can optionally add a FREE Groq API key for cloud-accelerated transcription."
+echo "This is completely optional — local mode works great on its own."
 echo ""
-read -p "Install local fallback support? (Y/n): " INSTALL_LOCAL
+read -p "Set up Groq cloud transcription? (y/N): " SETUP_GROQ
 
-if [[ ! "$INSTALL_LOCAL" =~ ^[Nn]$ ]]; then
-    WHISPER_DIR="$HOME/whisper.cpp"
+if [[ "$SETUP_GROQ" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo -e "1. Visit: ${GREEN}https://console.groq.com${NC}"
+    echo -e "2. Sign up (free)"
+    echo -e "3. Go to API Keys section"
+    echo -e "4. Create a new key and copy it"
+    echo ""
+    read -p "Paste your Groq API key here (or press Enter to skip): " GROQ_KEY
 
-    # Check if whisper.cpp already exists
-    if [ -d "$WHISPER_DIR" ]; then
-        echo -e "  ${GREEN}✓${NC} whisper.cpp already exists at $WHISPER_DIR"
-
-        # Check if it's built
-        if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
-            echo -e "  ${YELLOW}!${NC} Not built yet, building now..."
-            cd "$WHISPER_DIR"
-            cmake -B build > /dev/null 2>&1
-            cmake --build build > /dev/null 2>&1
-            cd "$SCRIPT_DIR"
-            if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
-                echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
-                echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
-                echo -e "  ${YELLOW}!${NC} Continuing without local fallback..."
-            else
-                echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
-            fi
-        fi
-    else
-        echo -e "  ${BLUE}→${NC} Cloning whisper.cpp..."
-        git clone https://github.com/ggerganov/whisper.cpp "$WHISPER_DIR" > /dev/null 2>&1
-        echo -e "  ${GREEN}✓${NC} Cloned whisper.cpp"
-
-        echo -e "  ${BLUE}→${NC} Building whisper.cpp (this may take 1-2 minutes)..."
-        cd "$WHISPER_DIR"
-        cmake -B build > /dev/null 2>&1
-        cmake --build build > /dev/null 2>&1
-        cd "$SCRIPT_DIR"
-        if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
-            echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
-            echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
-            echo -e "  ${YELLOW}!${NC} Continuing without local fallback..."
+    if [ -n "$GROQ_KEY" ]; then
+        # Use sed to replace the placeholder (| delimiter avoids issues with special chars in key)
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|# GROQ_API_KEY=gsk_your_key_here|GROQ_API_KEY=$GROQ_KEY|" .env
+            sed -i '' "s|# DICTATE_BACKEND=local|DICTATE_BACKEND=groq|" .env
         else
-            echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+            sed -i "s|# GROQ_API_KEY=gsk_your_key_here|GROQ_API_KEY=$GROQ_KEY|" .env
+            sed -i "s|# DICTATE_BACKEND=local|DICTATE_BACKEND=groq|" .env
         fi
-    fi
-
-    # Model selection
-    echo ""
-    echo -e "${BLUE}Choose a model:${NC}"
-    echo "  1) base.en       - Fast, less accurate (141MB, ~1-2s)"
-    echo "  2) small.en      - Balanced (466MB, ~2-3s) [RECOMMENDED]"
-    echo "  3) large-v3-turbo - Best accuracy (1.5GB, ~3-5s)"
-    echo ""
-    read -p "Enter choice (1/2/3) [2]: " MODEL_CHOICE
-    MODEL_CHOICE=${MODEL_CHOICE:-2}
-
-    case $MODEL_CHOICE in
-        1)
-            MODEL_NAME="base.en"
-            MODEL_FILE="ggml-base.en.bin"
-            ;;
-        3)
-            MODEL_NAME="large-v3-turbo"
-            MODEL_FILE="ggml-large-v3-turbo.bin"
-            ;;
-        *)
-            MODEL_NAME="small.en"
-            MODEL_FILE="ggml-small.en.bin"
-            ;;
-    esac
-
-    # Download model if not exists
-    if [ -f "$WHISPER_DIR/models/$MODEL_FILE" ]; then
-        echo -e "  ${GREEN}✓${NC} Model $MODEL_NAME already downloaded"
+        echo -e "  ${GREEN}✓${NC} Groq API key saved — using cloud transcription with local fallback"
     else
-        echo -e "  ${BLUE}→${NC} Downloading $MODEL_NAME model..."
-        cd "$WHISPER_DIR/models"
-        ./download-ggml-model.sh "$MODEL_NAME" > /dev/null 2>&1
-        cd "$SCRIPT_DIR"
-        echo -e "  ${GREEN}✓${NC} Downloaded $MODEL_NAME model"
+        echo -e "  ${YELLOW}!${NC} Skipped — using local transcription"
     fi
-
-    # Update .env with paths
-    echo -e "  ${BLUE}→${NC} Configuring .env..."
-
-    # Use sed to uncomment and set paths
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|# WHISPER_CPP_PATH=.*|WHISPER_CPP_PATH=$WHISPER_DIR/build/bin/whisper-cli|" .env
-        sed -i '' "s|# WHISPER_SERVER_PATH=.*|WHISPER_SERVER_PATH=$WHISPER_DIR/build/bin/whisper-server|" .env
-        sed -i '' "s|# WHISPER_MODEL_PATH=.*|WHISPER_MODEL_PATH=$WHISPER_DIR/models/$MODEL_FILE|" .env
-        sed -i '' "s|# FALLBACK_TO_LOCAL=.*|FALLBACK_TO_LOCAL=true|" .env
-    else
-        sed -i "s|# WHISPER_CPP_PATH=.*|WHISPER_CPP_PATH=$WHISPER_DIR/build/bin/whisper-cli|" .env
-        sed -i "s|# WHISPER_SERVER_PATH=.*|WHISPER_SERVER_PATH=$WHISPER_DIR/build/bin/whisper-server|" .env
-        sed -i "s|# WHISPER_MODEL_PATH=.*|WHISPER_MODEL_PATH=$WHISPER_DIR/models/$MODEL_FILE|" .env
-        sed -i "s|# FALLBACK_TO_LOCAL=.*|FALLBACK_TO_LOCAL=true|" .env
-    fi
-
-    echo -e "  ${GREEN}✓${NC} Local fallback configured"
 else
-    echo -e "  ${YELLOW}!${NC} Skipped - local fallback disabled"
-
-    # Set FALLBACK_TO_LOCAL=false in .env
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|# FALLBACK_TO_LOCAL=.*|FALLBACK_TO_LOCAL=false|" .env
-    else
-        sed -i "s|# FALLBACK_TO_LOCAL=.*|FALLBACK_TO_LOCAL=false|" .env
-    fi
-
-    echo -e "  ${BLUE}Note:${NC} App will only work when connected to internet (Groq API)"
+    echo -e "  ${GREEN}✓${NC} Using local transcription (no cloud API)"
 fi
 
 # Auto-start setup
 echo ""
-echo -e "${YELLOW}[6/7] Auto-start on login setup...${NC}"
+echo -e "${YELLOW}[7/7] Auto-start on login setup...${NC}"
 read -p "Start Whisper Dictate automatically when you open Terminal? (Y/n): " AUTOSTART
 
 if [[ ! "$AUTOSTART" =~ ^[Nn]$ ]]; then
@@ -257,7 +255,7 @@ fi
 
 # Test run
 echo ""
-echo -e "${YELLOW}[7/7] Starting Whisper Dictate...${NC}"
+echo -e "${YELLOW}Starting Whisper Dictate...${NC}"
 
 # Kill any existing instance
 pkill -f "dictate.py" 2>/dev/null || true
