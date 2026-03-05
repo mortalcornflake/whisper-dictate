@@ -1,13 +1,16 @@
 # Whisper Dictate - Future Roadmap
 
 ## Current State (v1)
+- Local-first: runs entirely on your Mac using whisper.cpp (no API keys needed)
+- Default model: Large v3 Turbo (best accuracy, ~3-5s on Apple Silicon)
 - Configurable hotkey via .env (default: Right Option key)
-- Transcribe via Groq Whisper API (fast, free tier)
-- Automatic fallback to local whisper.cpp if offline/rate-limited
+- Optional cloud transcription via Groq API (free, ~2s turnaround)
+- Automatic fallback to local if cloud is unreachable
 - Sound feedback (Tink/Blow/Glass)
 - Clipboard preservation (your clipboard is restored after pasting)
-- Ctrl+Shift+R manual reset + 45-second auto-reset safety net
-- Manual startup via Terminal (permissions work reliably)
+- Toggle mode: press hotkey to start, press again to stop
+- Ctrl+Shift+R manual reset + auto-stop safety net
+- Server mode: whisper server stays in background for fast response, auto-shuts down after 30min idle
 
 ---
 
@@ -78,24 +81,6 @@ Raw transcription includes filler words (um, uh, like, you know), false starts, 
 
 ## Other Future Ideas
 
-### ✅ Clipboard Preservation (COMPLETED)
-~~Save clipboard contents before pasting, restore after~~
-
-**Status**: Implemented in dictate.py
-- Added `get_clipboard()` and `set_clipboard()` helper functions
-- Modified `paste_text()` to save/restore clipboard contents
-- Your clipboard is now preserved after dictation
-- Made optional via `PRESERVE_CLIPBOARD` env var (default: true)
-- Disable for faster pasting with no 0.5s delay
-
-### ✅ Configurable Hotkey via .env (COMPLETED)
-~~Allow hotkey configuration without editing code~~
-
-**Status**: Implemented in dictate.py
-- Added `parse_hotkey()` function to parse env var to pynput key
-- Supports: alt_r, alt_l, ctrl_r, ctrl_l, cmd_r, cmd_l, f5-f10, and more
-- Configure via `HOTKEY=` in `.env` - no code editing needed
-
 ### Language Selection
 Whisper supports 99 languages. Add language hint for better accuracy:
 ```bash
@@ -153,13 +138,19 @@ Option to auto-detect speech start/stop instead of holding key:
 
 ---
 
+## Completed Features
+
+- [x] Local-first defaults (no API key needed out of the box)
+- [x] Clipboard preservation (PRESERVE_CLIPBOARD env var)
+- [x] Configurable hotkey via .env (HOTKEY env var)
+- [x] Toggle mode (press again to stop — fixes lost key release events)
+- [x] Auto-stop safety timeout (configurable via AUTO_STOP_TIMEOUT)
+- [x] Server mode with auto-cleanup (30min idle timeout)
+
 ## Technical Debt
-- [x] Suppress urllib3 SSL warning properly
-- [x] Improve Ctrl+Shift+R reset reliability (stops recorder.recording flag)
-- [x] Add auto-reset safety timeout (45 seconds, configurable)
-- [x] Move imports to top of file (code cleanup)
-- [x] Configurable hotkey via .env
+
 - [ ] Better error handling for malformed audio
 - [ ] Configurable sounds (or disable)
 - [ ] Config file instead of env vars
 - [ ] Proper logging to file with rotation
+- [ ] PID file tracking to kill orphaned whisper-server on next start

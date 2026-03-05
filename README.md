@@ -164,8 +164,8 @@ All settings can be configured via environment variables in `.env`:
 # Optional: Auto-press Enter/Return after pasting (default: false)
 # AUTO_PRESS_ENTER=true  # Automatically press Enter after transcription
 
-# Optional: Auto-stop timeout in seconds (default: 45)
-# AUTO_STOP_TIMEOUT=45  # Auto-stop and transcribe stuck recordings after 45s
+# Optional: Auto-stop timeout in seconds (default: 300 = 5 minutes)
+# AUTO_STOP_TIMEOUT=300  # Auto-stop and transcribe stuck recordings
 
 # Optional: Pin to specific microphone
 # INPUT_DEVICE=MacBook Pro Microphone
@@ -325,7 +325,7 @@ If stuck in recording mode, try these in order:
 1. **Tap the hotkey again** (Right Option) - toggle mode will stop it
 2. **Ctrl+Shift+R** - keyboard-based reset
 3. **`~/whisper-dictate/force-reset.sh`** - external reset via signals (doesn't kill the process)
-4. **Wait 45 seconds** - automatic safety reset kicks in (configurable via `AUTO_STOP_TIMEOUT`)
+4. **Wait 5 minutes** - automatic safety reset kicks in (configurable via `AUTO_STOP_TIMEOUT`)
 5. **`~/whisper-dictate/restart-dictate.sh`** - full restart (kills and restarts the process)
 
 Other issues:
