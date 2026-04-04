@@ -69,16 +69,14 @@ if [ -d "$WHISPER_DIR" ]; then
     if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
         echo -e "  ${YELLOW}!${NC} Not built yet, building now..."
         cd "$WHISPER_DIR"
-        cmake -B build > /dev/null 2>&1
-        cmake --build build > /dev/null 2>&1
-        cd "$SCRIPT_DIR"
-        if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
-            echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
+        if cmake -B build > /dev/null 2>&1 && cmake --build build --config Release -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) 2>&1 | tail -5; then
+            echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+        else
+            echo -e "  ${RED}✗${NC} Build failed"
             echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
             echo -e "  ${YELLOW}!${NC} Continuing without local engine (will need cloud API)..."
-        else
-            echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
         fi
+        cd "$SCRIPT_DIR"
     fi
 else
     echo -e "  ${BLUE}→${NC} Cloning whisper.cpp..."
@@ -87,16 +85,14 @@ else
 
     echo -e "  ${BLUE}→${NC} Building whisper.cpp (this may take 1-2 minutes)..."
     cd "$WHISPER_DIR"
-    cmake -B build > /dev/null 2>&1
-    cmake --build build > /dev/null 2>&1
-    cd "$SCRIPT_DIR"
-    if [ ! -f "$WHISPER_DIR/build/bin/whisper-cli" ]; then
-        echo -e "  ${RED}✗${NC} Build failed - whisper-cli binary not found"
+    if cmake -B build > /dev/null 2>&1 && cmake --build build --config Release -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) 2>&1 | tail -5; then
+        echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
+    else
+        echo -e "  ${RED}✗${NC} Build failed"
         echo "  Try building manually: cd $WHISPER_DIR && cmake -B build && cmake --build build"
         echo -e "  ${YELLOW}!${NC} Continuing without local engine (will need cloud API)..."
-    else
-        echo -e "  ${GREEN}✓${NC} Built whisper.cpp"
     fi
+    cd "$SCRIPT_DIR"
 fi
 
 # Model selection
