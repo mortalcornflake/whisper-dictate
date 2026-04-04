@@ -415,6 +415,10 @@ If you find this useful:
 
 MIT - see [LICENSE](LICENSE)
 
+## Built By
+
+[Modicum Studio](https://modicum.studio) — built because every dictation tool was either slow, inaccurate, or expensive. Open source because progress shouldn't be locked behind a paywall.
+
 ## Acknowledgments
 
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for excellent local inference
