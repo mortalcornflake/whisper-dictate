@@ -80,9 +80,11 @@ the same signatures as `platform_io/darwin.py`:
 
 ## Getting your work back to the repo
 
-The code likely arrived here as a **ZIP (no git history)**, and you're on a
-different GitHub login. To push your work back to `github.com/mortalcornflake/
-whisper-dictate`, you'll need git installed and push access — **coordinate with
-the owner (Aaron) on this**; don't assume you can push. Until then, commit
-locally if git is available, or keep changes ready to hand back. Confirm the
-approach with the user before attempting any push.
+This repo is **public**, so `git clone https://github.com/mortalcornflake/whisper-dictate`
+works without auth. **Pushing** back, however, needs write access — and this PC is
+likely signed in under a different GitHub account than the owner's. So:
+
+- Commit your work locally as you go (clear messages, keep macOS working).
+- **Do not assume you can push.** Confirm with the owner (Aaron) how to get changes
+  back — options are: he authenticates `gh`/git on this machine, you open a PR from
+  a fork, or you hand the diff back. Ask before pushing.
