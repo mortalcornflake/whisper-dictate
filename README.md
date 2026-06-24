@@ -11,6 +11,12 @@ TODO: Add demo GIF here
 ![Demo](assets/demo.gif)
 -->
 
+> **Windows support is in progress.** A cross-platform port (NVIDIA GPU via
+> faster-whisper, one-click installer, system-tray app) is underway. See
+> [`CROSS_PLATFORM.md`](CROSS_PLATFORM.md) for the plan. **Setting up or
+> developing on Windows? Start with [`WINDOWS_SETUP.md`](WINDOWS_SETUP.md) and,
+> for Claude Code sessions, [`WINDOWS_AGENT_BRIEF.md`](WINDOWS_AGENT_BRIEF.md).**
+
 ## Why Whisper Dictate?
 
 macOS's built-in dictation is... fine. But if you want:
