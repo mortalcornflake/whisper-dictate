@@ -16,6 +16,35 @@
 So the first goal on Windows is simply: **confirm the NVIDIA GPU works and
 transcription is good.**
 
+## Fastest path: let Claude Code do all of this
+
+If Claude Code is installed and signed in on this PC, you don't have to run the
+steps below by hand. Just paste this prompt into Claude Code and it will install
+Git + Python, clone the repo, set up the environment, and run the GPU check:
+
+```text
+You're setting up the Whisper Dictate project on this Windows 11 PC for a
+non-technical user. Do the following, explaining briefly as you go:
+
+1. If Git is not installed, install it with: winget install --id Git.Git -e --source winget
+2. If Python 3.12 is not installed, install it with: winget install --id Python.Python.3.12 -e --source winget
+   (Open a fresh shell afterward, or use the `py -3.12` launcher, so PATH updates take effect.)
+3. Clone the repo into the user's home folder:
+   git clone https://github.com/mortalcornflake/whisper-dictate
+   then cd into whisper-dictate.
+4. Create and activate a venv, then install deps:
+   py -3.12 -m venv venv
+   .\venv\Scripts\Activate.ps1
+   pip install -r requirements.txt -r requirements-windows.txt
+5. Run: python check_setup.py
+   Report whether it shows "device detected : cuda" and whether the transcription
+   was correct.
+6. Then read WINDOWS_AGENT_BRIEF.md in the repo and follow it for the next phases,
+   pausing to confirm with the user before large changes.
+```
+
+The manual steps below are the same thing, by hand, if you prefer.
+
 ## 1. Install Python 3.12
 
 - Download from <https://www.python.org/downloads/> (get **3.12.x**, not 3.13 —
@@ -29,16 +58,23 @@ transcription is good.**
 
 ## 2. Get the code
 
-Download the repo as a ZIP from GitHub (green **Code** button → **Download ZIP**)
-and unzip it somewhere simple like `C:\whisper-dictate`.
+Clone the repo with Git (install Git from <https://git-scm.com/downloads/win> or
+`winget install --id Git.Git -e` if you don't have it):
+
+```powershell
+git clone https://github.com/mortalcornflake/whisper-dictate
+cd whisper-dictate
+```
+
+(No-Git alternative: GitHub's green **Code** button → **Download ZIP**, then
+unzip — but cloning is better so you can pull updates and push changes back.)
 
 ## 3. Create a virtual environment and install dependencies
 
-Open **PowerShell**, then:
+From inside the `whisper-dictate` folder in **PowerShell**:
 
 ```powershell
-cd C:\whisper-dictate
-python -m venv venv
+py -3.12 -m venv venv
 .\venv\Scripts\Activate.ps1
 ```
 
