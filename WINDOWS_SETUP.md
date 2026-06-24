@@ -27,8 +27,11 @@ You're setting up the Whisper Dictate project on this Windows 11 PC for a
 non-technical user. Do the following, explaining briefly as you go:
 
 1. If Git is not installed, install it with: winget install --id Git.Git -e --source winget
-2. If Python 3.12 is not installed, install it with: winget install --id Python.Python.3.12 -e --source winget
-   (Open a fresh shell afterward, or use the `py -3.12` launcher, so PATH updates take effect.)
+2. First, run `py --list` and `where python` and tell me which Python versions are
+   ALREADY installed (so I know what else is on this machine). Then, only if Python
+   3.12 is missing, install it with: winget install --id Python.Python.3.12 -e --source winget
+   This adds a separate 3.12 alongside anything already there; it does not replace
+   other versions. Use the `py -3.12` launcher and a fresh shell so PATH updates apply.
 3. Clone the repo into the user's home folder:
    git clone https://github.com/mortalcornflake/whisper-dictate
    then cd into whisper-dictate.
@@ -37,8 +40,9 @@ non-technical user. Do the following, explaining briefly as you go:
    .\venv\Scripts\Activate.ps1
    pip install -r requirements.txt -r requirements-windows.txt
 5. Run: python check_setup.py
-   Report whether it shows "device detected : cuda" and whether the transcription
-   was correct.
+   (This uses a bundled sample.wav by default, so nobody has to speak. Add --mic to
+   test the live microphone instead.) Report whether it shows "device detected : cuda"
+   and whether the transcription was correct.
 6. Then read WINDOWS_AGENT_BRIEF.md in the repo and follow it for the next phases,
    pausing to confirm with the user before large changes.
 ```
@@ -103,8 +107,9 @@ python check_setup.py
 
 This reports your OS/Python, checks every dependency, prints the detected
 **device / VRAM / model / compute type**, loads the model (first run downloads
-it), then records 4 seconds from your mic and transcribes it. You can also pass a
-WAV file instead of using the mic: `python check_setup.py some_audio.wav`.
+it), then transcribes the **bundled `sample.wav`** so the check is fully
+hands-off — no one needs to speak. To test the live mic instead, run
+`python check_setup.py --mic`; to use a specific file, pass its path.
 
 **What you want to see:** `device detected : cuda` and `>>> NVIDIA GPU will be
 used.`, followed by a correct transcript. If it says `cpu`, transcription still
