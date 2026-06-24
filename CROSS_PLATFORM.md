@@ -82,9 +82,13 @@ Each phase keeps the macOS app working at every commit.
   `osascript`/`afplay` calls behind it; clipboard via `pyperclip`; guarded the
   SIGUSR1 reset behind `register_external_reset`. macOS behavior unchanged;
   verified the refactor compiles, imports, and resolves to the darwin backend.
-- [ ] **Phase 2 — `faster-whisper` backend (cross-platform).** New backend with
-  the hardware auto-detection above. macOS keeps whisper.cpp; Windows defaults to
-  this.
+- [x] **Phase 2 — `faster-whisper` backend (cross-platform).** ✅ DONE
+  Added `faster_whisper_backend.py` (lazy model load, env overrides) wired into
+  `dictate.py` as the `faster-whisper` backend, with hardware auto-detection
+  (device/VRAM → model + compute type) and progressive compute-type fallback.
+  Cloud backends now fall back to whichever local engine is present (whisper.cpp
+  preferred, else faster-whisper). Added `requirements-windows.txt` and `.env`
+  docs. Verified end-to-end on CPU: real speech transcribed correctly.
 - [ ] **Phase 3 — Windows adapter + tray UI (on Yuen's PC).** `windows.py`
   (`winsound`/bundled wavs, `plyer` toast, Ctrl+V paste, Startup-folder
   autostart). `pystray` tray icon with Idle/Recording status + right-click menu

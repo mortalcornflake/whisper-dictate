@@ -34,6 +34,7 @@ from pynput import keyboard
 
 import platform_io
 from platform_io import notify, play_sound, send_paste, send_enter, register_external_reset
+import faster_whisper_backend as fw_backend
 
 # Force unbuffered output
 def log(msg):
@@ -522,6 +523,16 @@ HALLUCINATION_PHRASES = {
 }
 
 
+def transcribe_local_fallback(audio_bytes: bytes) -> str:
+    """Transcribe with whichever local engine is available — whisper.cpp if it's
+    installed (macOS default), otherwise faster-whisper (Windows default). Used as
+    the fallback target for cloud backends."""
+    if os.path.exists(WHISPER_CPP_PATH) and os.path.exists(WHISPER_MODEL_PATH):
+        start_whisper_server()  # lazy server init for whisper.cpp
+        return transcribe_local(audio_bytes)
+    return fw_backend.transcribe(audio_bytes)
+
+
 def transcribe(audio_bytes: bytes) -> str:
     """Transcribe audio using configured backend, with local fallback."""
     log(f"📝 Transcribing with {BACKEND}...")
@@ -534,18 +545,23 @@ def transcribe(audio_bytes: bytes) -> str:
             result = transcribe_openai(audio_bytes)
         elif BACKEND == "local":
             result = transcribe_local(audio_bytes)
+        elif BACKEND == "faster-whisper":
+            result = fw_backend.transcribe(audio_bytes)
         else:
             log(f"❌ Unknown backend: {BACKEND}")
             return ""
     except (requests.exceptions.RequestException, RuntimeError, ValueError) as e:
-        if FALLBACK_TO_LOCAL and BACKEND != "local":
-            log(f"⚠️  Cloud failed ({e}), falling back to local whisper.cpp...")
+        # Only cloud backends fall back to a local engine; the local engines are
+        # already the last resort.
+        if FALLBACK_TO_LOCAL and BACKEND in ("groq", "openai"):
+            log(f"⚠️  Cloud failed ({e}), falling back to local transcription...")
             notify("Whisper Dictate", f"Using local fallback: {e}")
-
-            # Start server on first fallback (lazy initialization)
-            start_whisper_server()
-
-            result = transcribe_local(audio_bytes)
+            try:
+                result = transcribe_local_fallback(audio_bytes)
+            except Exception as fe:
+                log(f"❌ Local fallback failed: {fe}")
+                notify("Whisper Dictate", f"Transcription failed: {fe}")
+                return ""
         else:
             log(f"❌ Transcription failed: {e}")
             notify("Whisper Dictate", f"Transcription failed: {e}")
@@ -838,23 +854,29 @@ def main():
         else:
             log("⚠️  OPENAI_API_KEY not set.")
             sys.exit(1)
+    elif BACKEND == "faster-whisper":
+        if not fw_backend.is_available():
+            log("❌ faster-whisper backend selected but the package isn't installed.")
+            log("   Install it with: pip install faster-whisper")
+            sys.exit(1)
 
-    # Verify local whisper.cpp exists if cloud backend has local fallback enabled
-    if FALLBACK_TO_LOCAL and BACKEND != "local":
-        if not os.path.exists(WHISPER_CPP_PATH):
-            log(f"⚠️  whisper.cpp CLI not found at: {WHISPER_CPP_PATH}")
-            log(f"   Local fallback disabled (cloud-only mode)")
-        elif not os.path.exists(WHISPER_MODEL_PATH):
-            log(f"⚠️  Whisper model not found at: {WHISPER_MODEL_PATH}")
-            log(f"   Local fallback disabled (cloud-only mode)")
+    # Verify a local fallback engine exists for cloud backends.
+    if FALLBACK_TO_LOCAL and BACKEND in ("groq", "openai"):
+        have_whisper_cpp = os.path.exists(WHISPER_CPP_PATH) and os.path.exists(WHISPER_MODEL_PATH)
+        if not have_whisper_cpp and not fw_backend.is_available():
+            log(f"⚠️  No local fallback available (whisper.cpp not found at {WHISPER_CPP_PATH},")
+            log(f"   and faster-whisper not installed) — running cloud-only.")
 
     # Start idle checker thread for whisper server cleanup
     idle_checker = threading.Thread(target=check_server_idle, daemon=True)
     idle_checker.start()
 
-    # If using local backend, start server immediately
+    # If using a local backend, get it ready up front.
     if BACKEND == "local":
         start_whisper_server()
+    elif BACKEND == "faster-whisper":
+        # Warm up the model in the background so the first dictation is fast.
+        threading.Thread(target=fw_backend.warmup, daemon=True).start()
 
     # Register cleanup for all exit paths
     atexit.register(_cleanup_all_subprocesses)
