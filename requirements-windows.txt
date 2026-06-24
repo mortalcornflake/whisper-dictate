@@ -1,0 +1,14 @@
+# Windows runtime requirements — install alongside requirements.txt:
+#   pip install -r requirements.txt -r requirements-windows.txt
+#
+# Local transcription engine (CUDA-accelerated, no compilation needed).
+faster-whisper>=1.0.0
+
+# Optional: lets the backend read exact VRAM for smarter model selection.
+# Without it, model size is still chosen sensibly from a GPU-present check.
+nvidia-ml-py>=12.0.0
+
+# NVIDIA CUDA 12 runtime libraries for GPU acceleration. faster-whisper falls
+# back to CPU automatically if these (or a GPU) are absent.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
