@@ -8,8 +8,9 @@ adapter); it checks the transcription engine in isolation so the GPU path can be
 validated first.
 
 Usage:
-    python check_setup.py            # detect hardware, load model, 4s mic test
-    python check_setup.py audio.wav  # transcribe a WAV file instead of the mic
+    python check_setup.py            # uses the bundled sample.wav (no mic needed)
+    python check_setup.py --mic      # record 4s from the mic and transcribe that
+    python check_setup.py audio.wav  # transcribe a specific WAV file
 """
 import os
 import sys
@@ -123,7 +124,19 @@ def main():
     fw = check_engine()
     if fw is None:
         sys.exit(1)
-    wav_path = sys.argv[1] if len(sys.argv) > 1 else None
+
+    # Decide the audio source. Default is the bundled sample so the check is
+    # fully hands-off (no one has to speak); --mic records live; or pass a file.
+    sample = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample.wav")
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    if arg == "--mic":
+        wav_path = None  # record from the mic
+    elif arg:
+        wav_path = arg
+    elif os.path.exists(sample):
+        wav_path = sample
+    else:
+        wav_path = None  # no bundled sample found; fall back to the mic
     check_transcription(fw, wav_path)
 
     section("Done")
