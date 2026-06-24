@@ -32,6 +32,9 @@ import pyperclip
 import requests
 from pynput import keyboard
 
+import platform_io
+from platform_io import notify, play_sound, send_paste, send_enter, register_external_reset
+
 # Force unbuffered output
 def log(msg):
     print(msg, flush=True)
@@ -141,26 +144,6 @@ def _cleanup_all_subprocesses():
                 pass
         _all_recorder_processes.clear()
     stop_whisper_server()
-
-
-def notify(title, message):
-    """Show macOS notification."""
-    # Escape backslashes and double quotes for AppleScript string literals
-    safe_title = title.replace('\\', '\\\\').replace('"', '\\"')
-    safe_message = message.replace('\\', '\\\\').replace('"', '\\"')
-    subprocess.run([
-        "osascript", "-e",
-        f'display notification "{safe_message}" with title "{safe_title}"'
-    ], capture_output=True)
-
-
-def sound(name="Pop", blocking=True):
-    """Play system sound."""
-    cmd = ["afplay", f"/System/Library/Sounds/{name}.aiff"]
-    if blocking:
-        subprocess.run(cmd, capture_output=True)
-    else:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def recording_worker(output_path, device_name, sample_rate, channels, ready_event, go_event):
@@ -290,7 +273,7 @@ class Recorder:
         else:
             log("⚠️  Recording subprocess slow to start")
 
-        sound("Tink", blocking=False)
+        play_sound("start")
 
     def stop(self) -> bytes:
         """Stop recording subprocess and extract audio."""
@@ -577,14 +560,13 @@ def transcribe(audio_bytes: bytes) -> str:
 
 
 def get_clipboard() -> str:
-    """Get current clipboard contents using pbpaste."""
-    result = subprocess.run(['pbpaste'], capture_output=True, text=True)
-    return result.stdout
+    """Get current clipboard contents (cross-platform via pyperclip)."""
+    return pyperclip.paste()
 
 
 def set_clipboard(text: str):
-    """Set clipboard contents using pbcopy."""
-    subprocess.run(['pbcopy'], input=text.encode(), check=True)
+    """Set clipboard contents (cross-platform via pyperclip)."""
+    pyperclip.copy(text)
 
 
 def paste_text(text: str):
@@ -599,11 +581,8 @@ def paste_text(text: str):
     # Copy new text and paste
     pyperclip.copy(text)
 
-    # Use osascript to paste (more reliable than pyautogui on macOS)
-    subprocess.run([
-        "osascript", "-e",
-        'tell application "System Events" to keystroke "v" using command down'
-    ])
+    # Simulate the paste shortcut (platform-specific: Cmd+V / Ctrl+V)
+    send_paste()
     log(f"✅ Pasted: {text[:50]}{'...' if len(text) > 50 else ''}")
 
     if PRESERVE_CLIPBOARD and old_clipboard is not None:
@@ -617,14 +596,11 @@ def paste_text(text: str):
     # Automatically press Enter/Return if enabled
     if AUTO_PRESS_ENTER:
         time.sleep(0.1)  # Brief pause to ensure paste completes
-        subprocess.run([
-            "osascript", "-e",
-            'tell application "System Events" to key code 36'  # 36 is Return key
-        ])
+        send_enter()
         log("⏎  Pressed Enter")
 
     # Play sound AFTER clipboard operations complete
-    sound("Glass")
+    play_sound("done", blocking=True)
 
 
 class DictationListener:
@@ -717,7 +693,7 @@ class DictationListener:
             try:
                 if old_recorder:
                     audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
-                    sound("Blow", blocking=False)  # Play after recording stops
+                    play_sound("stop")  # Play after recording stops
                     if audio_bytes:
                         self._process_audio(audio_bytes)
             except Exception as e:
@@ -780,7 +756,7 @@ class DictationListener:
         threading.Thread(target=kill_and_process, daemon=True).start()
 
         notify("Whisper Dictate", "Recorder reset - ready to record")
-        sound("Glass")
+        play_sound("done", blocking=True)
         log("✅ Recorder reset complete (subprocess will be killed)")
 
     def _auto_reset_check(self):
@@ -796,7 +772,7 @@ class DictationListener:
                 warning_at = AUTO_STOP_TIMEOUT - AUTO_STOP_WARNING
                 if not getattr(self, '_warning_played', False) and elapsed > warning_at:
                     self._warning_played = True
-                    sound("Sosumi", blocking=False)
+                    play_sound("warning")
                     log(f"⚠️  Recording approaching limit ({AUTO_STOP_WARNING}s remaining)")
 
                 # Auto-reset and process the audio if stuck
@@ -891,11 +867,12 @@ def main():
 
     listener = DictationListener()
 
-    # Register SIGUSR1 handler for external reset (force-reset.sh)
-    def sigusr1_handler(signum, frame):
-        log("🔄 SIGUSR1 received - resetting recorder")
-        listener.reset(reason="SIGUSR1 signal")
-    signal.signal(signal.SIGUSR1, sigusr1_handler)
+    # Register external reset handler (force-reset.sh sends SIGUSR1 on macOS;
+    # on Windows this is a no-op and reset comes from the tray menu instead).
+    def on_external_reset():
+        log("🔄 External reset signal received - resetting recorder")
+        listener.reset(reason="External reset signal")
+    register_external_reset(on_external_reset)
 
     try:
         listener.run()
