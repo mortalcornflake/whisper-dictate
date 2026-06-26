@@ -17,6 +17,64 @@ TODO: Add demo GIF here
 > developing on Windows? Start with [`WINDOWS_SETUP.md`](WINDOWS_SETUP.md) and,
 > for Claude Code sessions, [`WINDOWS_AGENT_BRIEF.md`](WINDOWS_AGENT_BRIEF.md).**
 
+## Windows port — status & handoff (2026-06-26)
+
+> Built and verified on the target Windows 11 PC (NVIDIA GPU, 12 GB VRAM). The
+> dictation tool is **fully working on Windows today**: hold **Right Ctrl**,
+> speak, release → it records, transcribes on the GPU (faster-whisper / CUDA),
+> and pastes at the cursor. It runs as a tray app and auto-starts at login. What
+> remains is packaging it into an installer and writing user docs. All Windows
+> work is committed on the **`windows-port-phase3`** branch.
+
+**What works (verified end-to-end on the machine):**
+- GPU transcription — faster-whisper, CUDA, `large-v3-turbo`, `float16`
+  (confirmed via `check_setup.py`: `device detected : cuda`).
+- Hold-to-talk dictation (`dictate.py`): record → transcribe → paste, clipboard
+  preserved.
+- Tray app (`tray_app.py`): idle (grey) / recording (red) icon + right-click
+  Reset / Settings / Quit. Settings opens `.env`.
+- Auto-start at login + a Desktop shortcut, via `start-dictate.vbs` →
+  `start-dictate.bat` (runs hidden, logs to `%USERPROFILE%\whisper-dictate.log`).
+- Single-instance lock (a second launch exits instead of double-typing).
+
+**Phase 3 (Windows adapter + tray) — DONE.** New / changed files:
+- `platform_io/windows.py` *(new)* — winsound system sounds, win11toast
+  notifications, pynput Ctrl+V / Enter, no-op external reset.
+- `tray_app.py` *(new)* — pystray tray icon + Reset/Settings/Quit menu.
+- `dictate.py` — default to `faster-whisper` on Windows; run the keyboard
+  listener in a background thread with the tray on the main thread; ignore
+  held-key auto-repeat; event-based graceful subprocess stop (so audio saves on
+  Windows, where `terminate()` is forceful); encoding-safe `log()`; Windows
+  single-instance mutex.
+- `faster_whisper_backend.py` — encoding-safe logging; auto-add the pip-installed
+  CUDA DLL dirs (cublas / cudnn / nvrtc) to the DLL search path on Windows.
+- `requirements-windows.txt` — added `win11toast`, `pystray`, `Pillow`.
+
+**Phase 4 (installer) — PARTIAL.** Done: the "quick win" — auto-start launcher
+(`start-dictate.vbs`/`.bat`), Desktop + Startup shortcuts, single-instance lock.
+**Not done:** the packaged installer (PyInstaller onedir → Inno Setup `.exe`
+wizard, "run at login" checkbox, first-launch model download with progress).
+*Packaging notes:* `dictate.py`'s `__main__` path will need
+`multiprocessing.freeze_support()`, and the build must bundle the large NVIDIA
+CUDA runtime DLLs.
+
+**Phase 5 (docs) — NOT STARTED.** Cross-platform README + a non-technical
+Windows usage guide.
+
+**Setup gotchas found on the machine (worth documenting for users):**
+- The mic (Logitech C270) was **muted in Windows sound settings** → it recorded
+  silence. Check mic mute/level and **Microphone privacy** ("let desktop apps
+  access your microphone") first if capture fails.
+- pip's CUDA DLLs aren't on the Windows DLL search path by default (handled in
+  `faster_whisper_backend.py`).
+- Windows repeats held keys (handled) and force-kills subprocesses (handled).
+- The venv's base Python is the winget per-user install
+  (`%LOCALAPPDATA%\Programs\Python\Python312`), so spawn children run from there.
+
+**Run it (dev):** from the repo, `venv\Scripts\python.exe dictate.py`, or
+double-click the Desktop shortcut. Config in `.env`
+(`DICTATE_BACKEND=faster-whisper`, `HOTKEY=ctrl_r`).
+
 ## Why Whisper Dictate?
 
 macOS's built-in dictation is... fine. But if you want:
