@@ -38,7 +38,13 @@ import faster_whisper_backend as fw_backend
 
 # Force unbuffered output
 def log(msg):
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        # Some Windows consoles / redirected logs use a legacy code page (cp1252)
+        # that can't encode emoji; degrade gracefully instead of crashing.
+        enc = sys.stdout.encoding or "utf-8"
+        print(msg.encode(enc, errors="replace").decode(enc), flush=True)
 
 
 def parse_hotkey(key_str):
@@ -867,9 +873,32 @@ class DictationListener:
             listener.stop()
 
 
+def _acquire_single_instance_lock():
+    """Ensure only one instance runs on Windows — auto-start plus a manual launch
+    could otherwise run two copies that both type. Returns a handle to keep alive
+    for the process lifetime, or None. Exits if another instance already holds the
+    lock. No-op on non-Windows (macOS unaffected)."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    ERROR_ALREADY_EXISTS = 183
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, "Local\\WhisperDictateSingleton")
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        log("Another instance is already running - exiting this one.")
+        notify("Whisper Dictate", "Already running - see the tray icon by your clock.")
+        time.sleep(2)  # let the notification appear before we exit
+        sys.exit(0)
+    return handle
+
+
 def main():
     # Set multiprocessing start method for macOS
     multiprocessing.set_start_method('spawn', force=True)
+
+    # Only allow one running instance (Windows): keep the handle alive for the
+    # lifetime of main() so the lock is held until the app exits.
+    _single_instance_handle = _acquire_single_instance_lock()
 
     # Check for required configuration based on backend
     if BACKEND == "local":
