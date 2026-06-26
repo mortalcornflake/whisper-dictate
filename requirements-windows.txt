@@ -4,6 +4,14 @@
 # Local transcription engine (CUDA-accelerated, no compilation needed).
 faster-whisper>=1.0.0
 
+# Desktop toast notifications (Windows 10/11). Optional at runtime: the Windows
+# adapter degrades to no notification if this is missing.
+win11toast>=0.35
+
+# System-tray icon + menu (Idle/Recording status, Reset/Settings/Quit).
+pystray>=0.19
+Pillow>=10.0
+
 # Optional: lets the backend read exact VRAM for smarter model selection.
 # Without it, model size is still chosen sensibly from a GPU-present check.
 nvidia-ml-py>=12.0.0

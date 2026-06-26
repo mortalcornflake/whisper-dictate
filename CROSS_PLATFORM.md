@@ -89,11 +89,20 @@ Each phase keeps the macOS app working at every commit.
   Cloud backends now fall back to whichever local engine is present (whisper.cpp
   preferred, else faster-whisper). Added `requirements-windows.txt` and `.env`
   docs. Verified end-to-end on CPU: real speech transcribed correctly.
-- [ ] **Phase 3 — Windows adapter + tray UI (on Yuen's PC).** `windows.py`
-  (`winsound`/bundled wavs, `plyer` toast, Ctrl+V paste, Startup-folder
-  autostart). `pystray` tray icon with Idle/Recording status + right-click menu
-  (Quit, Reset, Settings) — replaces signal-based reset. Resolve the
-  Right Alt / AltGr hotkey question via first-run choice.
+- [x] **Phase 3 — Windows adapter + tray UI (on Yuen's PC).** ✅ DONE
+  Implemented `platform_io/windows.py` (winsound system sounds, win11toast
+  notifications, pynput Ctrl+V paste / Enter). Added `tray_app.py`: a `pystray`
+  tray icon with Idle (grey) / Recording (red) status and a right-click menu
+  (Reset / Settings / Quit) — the tray Reset replaces the signal-based reset.
+  `dictate.py` now defaults to the faster-whisper backend on Windows and runs the
+  keyboard listener in a background thread while the tray owns the main thread.
+  Fixed Windows-specific issues found in testing: emoji-print crash and CUDA DLL
+  discovery (in `faster_whisper_backend.py`), the held-key auto-repeat that
+  toggled recording, and graceful subprocess stop (event-based) so audio saves
+  on Windows where terminate() is forceful. Hotkey is a `.env` choice
+  (Right Ctrl chosen, avoiding the Right Alt / AltGr issue). Verified end-to-end
+  on Yuen's PC: speech → CUDA transcription → paste. Still TODO for the installer
+  phase: Startup-folder autostart.
 - [ ] **Phase 4 — Friendly installer (on Yuen's PC).** PyInstaller (onedir) →
   Inno Setup wizard with Start Menu shortcut + "Run at login" checkbox. Model
   downloads on first launch with a progress bar. Optional GitHub Actions workflow
