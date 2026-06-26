@@ -47,11 +47,19 @@ def log(msg):
         print(msg.encode(enc, errors="replace").decode(enc), flush=True)
 
 
+def maybe_play_sound(event, blocking=False):
+    """Play a UI sound for a semantic event, unless sounds are turned off via
+    PLAY_SOUNDS=false in the .env."""
+    if PLAY_SOUNDS:
+        play_sound(event, blocking=blocking)
+
+
 def parse_hotkey(key_str):
     """Parse hotkey string from .env to pynput Key object."""
     key_map = {
         'alt_r': keyboard.Key.alt_r,
         'alt_l': keyboard.Key.alt_l,
+        'alt_gr': keyboard.Key.alt_gr,  # Right Alt on many Windows keyboards
         'option_r': keyboard.Key.alt_r,  # macOS alias
         'option_l': keyboard.Key.alt_l,  # macOS alias
         'ctrl_r': keyboard.Key.ctrl_r,
@@ -75,6 +83,7 @@ def get_hotkey_name(key):
     name_map = {
         keyboard.Key.alt_r: "Right Option",
         keyboard.Key.alt_l: "Left Option",
+        keyboard.Key.alt_gr: "Right Alt (AltGr)",
         keyboard.Key.ctrl_r: "Right Control",
         keyboard.Key.ctrl_l: "Left Control",
         keyboard.Key.cmd_r: "Right Command",
@@ -96,6 +105,7 @@ HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
+PLAY_SOUNDS = os.environ.get("PLAY_SOUNDS", "true").lower() in ("true", "1", "yes")  # UI sounds on/off
 AUTO_STOP_TIMEOUT = int(os.environ.get("AUTO_STOP_TIMEOUT", "300"))  # Seconds before auto-stop stuck recordings
 AUTO_STOP_WARNING = 10  # Seconds before auto-stop to play warning sound
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
@@ -286,7 +296,7 @@ class Recorder:
         else:
             log("⚠️  Recording subprocess slow to start")
 
-        play_sound("start")
+        maybe_play_sound("start")
 
     def stop(self) -> bytes:
         """Stop recording subprocess and extract audio."""
@@ -635,7 +645,7 @@ def paste_text(text: str):
         log("⏎  Pressed Enter")
 
     # Play sound AFTER clipboard operations complete
-    play_sound("done", blocking=True)
+    maybe_play_sound("done", blocking=True)
 
 
 class DictationListener:
@@ -737,7 +747,7 @@ class DictationListener:
             try:
                 if old_recorder:
                     audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
-                    play_sound("stop")  # Play after recording stops
+                    maybe_play_sound("stop")  # Play after recording stops
                     if audio_bytes:
                         self._process_audio(audio_bytes)
             except Exception as e:
@@ -800,7 +810,7 @@ class DictationListener:
         threading.Thread(target=kill_and_process, daemon=True).start()
 
         notify("Whisper Dictate", "Recorder reset - ready to record")
-        play_sound("done", blocking=True)
+        maybe_play_sound("done", blocking=True)
         log("✅ Recorder reset complete (subprocess will be killed)")
 
     def _auto_reset_check(self):
@@ -816,7 +826,7 @@ class DictationListener:
                 warning_at = AUTO_STOP_TIMEOUT - AUTO_STOP_WARNING
                 if not getattr(self, '_warning_played', False) and elapsed > warning_at:
                     self._warning_played = True
-                    play_sound("warning")
+                    maybe_play_sound("warning")
                     log(f"⚠️  Recording approaching limit ({AUTO_STOP_WARNING}s remaining)")
 
                 # Auto-reset and process the audio if stuck
