@@ -576,8 +576,12 @@ def transcribe(audio_bytes: bytes) -> str:
 
 
 def get_clipboard() -> str:
-    """Get current clipboard contents (cross-platform via pyperclip)."""
-    return pyperclip.paste()
+    """Get current clipboard contents (cross-platform via pyperclip).
+
+    pyperclip's macOS pyobjc backend returns None when the clipboard holds
+    non-text content (an image or file); coerce to "" so callers always get a
+    string (matching the old pbpaste behavior)."""
+    return pyperclip.paste() or ""
 
 
 def set_clipboard(text: str):
