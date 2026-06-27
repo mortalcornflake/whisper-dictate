@@ -15,7 +15,6 @@ import threading
 import subprocess
 import multiprocessing
 import signal
-from pathlib import Path
 
 # Suppress urllib3 SSL warning (cosmetic, caused by system Python's LibreSSL)
 import warnings
@@ -52,6 +51,19 @@ def maybe_play_sound(event, blocking=False):
     PLAY_SOUNDS=false in the .env."""
     if PLAY_SOUNDS:
         play_sound(event, blocking=blocking)
+
+
+def _env_int(name, default):
+    """Parse an integer env var, falling back to default on a missing/bad value.
+    Avoids crashing startup when a non-technical user mistypes a value in .env."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        log(f"⚠️  Invalid {name}={raw!r} in .env; using default {default}")
+        return default
 
 
 def parse_hotkey(key_str):
@@ -104,12 +116,15 @@ def get_hotkey_name(key):
 
 
 # === Configuration ===
-HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
+# Default hotkey is platform-aware: Right Option on macOS, Right Ctrl on Windows
+# (Right Alt there is AltGr on many layouts and misbehaves). Override with HOTKEY.
+_DEFAULT_HOTKEY = "ctrl_r" if sys.platform == "win32" else "alt_r"
+HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", _DEFAULT_HOTKEY))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
 PLAY_SOUNDS = os.environ.get("PLAY_SOUNDS", "true").lower() in ("true", "1", "yes")  # UI sounds on/off
-AUTO_STOP_TIMEOUT = int(os.environ.get("AUTO_STOP_TIMEOUT", "300"))  # Seconds before auto-stop stuck recordings
+AUTO_STOP_TIMEOUT = _env_int("AUTO_STOP_TIMEOUT", 300)  # Seconds before auto-stop stuck recordings
 AUTO_STOP_WARNING = 10  # Seconds before auto-stop to play warning sound
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
@@ -555,6 +570,12 @@ HALLUCINATION_PHRASES = {
 }
 
 
+def _is_hallucination(text: str) -> bool:
+    """True if text is a known Whisper phantom phrase (triggered by trailing
+    silence). Matched case-insensitively after stripping."""
+    return text.strip().lower() in HALLUCINATION_PHRASES
+
+
 def transcribe_local_fallback(audio_bytes: bytes) -> str:
     """Transcribe with whichever local engine is available — whisper.cpp if it's
     installed (macOS default), otherwise faster-whisper (Windows default). Used as
@@ -600,7 +621,7 @@ def transcribe(audio_bytes: bytes) -> str:
             return ""
 
     # Filter known Whisper hallucination phrases (triggered by trailing silence)
-    if result.strip().lower() in HALLUCINATION_PHRASES:
+    if _is_hallucination(result):
         log(f"Filtered hallucination: {result.strip()}")
         return ""
 
@@ -1004,4 +1025,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Required for PyInstaller-frozen builds using multiprocessing 'spawn'
+    # (Phase 4); a no-op when running normally.
+    multiprocessing.freeze_support()
     main()

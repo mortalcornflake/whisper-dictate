@@ -103,12 +103,31 @@ Each phase keeps the macOS app working at every commit.
   (Right Ctrl chosen, avoiding the Right Alt / AltGr issue). Verified end-to-end
   on Yuen's PC: speech → CUDA transcription → paste. Still TODO for the installer
   phase: Startup-folder autostart.
-- [ ] **Phase 4 — Friendly installer (on Yuen's PC).** PyInstaller (onedir) →
-  Inno Setup wizard with Start Menu shortcut + "Run at login" checkbox. Model
-  downloads on first launch with a progress bar. Optional GitHub Actions workflow
-  to build the installer artifact per release.
+- [~] **Phase 4 — Friendly installer (on the owner's Windows PC).** Done: hidden
+  auto-start launcher (`start-dictate.vbs`/`.bat`) + single-instance lock +
+  `freeze_support()`. TODO: PyInstaller (onedir, bundling the NVIDIA CUDA runtime
+  DLLs + `tray_app`/`platform_io`) → Inno Setup wizard (Start Menu/Desktop
+  shortcuts, "Run at login" checkbox, uninstall); first-launch model download with
+  a progress bar; code signing (or document the SmartScreen prompt).
 - [ ] **Phase 5 — Docs.** Cross-platform README + a dead-simple Windows install
-  guide for a non-technical user.
+  guide for a non-technical user. (Move the dated "Windows port — status" block
+  out of the README into this file.)
+
+### Testing & CI (added during the project review)
+
+- `tests/` — pytest unit suite for the pure logic (`trim_trailing_silence`,
+  hallucination filter, `get_clipboard` None-coercion, `parse_hotkey`, `_env_int`,
+  and the faster-whisper model/compute/device selection).
+- `.github/workflows/ci.yml` — runs the suite on **macOS + Windows** per push/PR.
+  Installing `requirements.txt` on the Windows runner also regression-tests that
+  the macOS-only pyobjc deps are correctly skipped there.
+- Run locally: `pip install -r requirements.txt -r requirements-dev.txt && pytest`.
+
+### Review hardening (done)
+
+Platform-aware `HOTKEY` default (`ctrl_r` on Windows, avoiding AltGr);
+`requirements.txt` pyobjc markers (cross-platform `pip install`); guarded `.env`
+int parsing; `multiprocessing.freeze_support()` for PyInstaller.
 
 ## Windows tech stack (chosen)
 

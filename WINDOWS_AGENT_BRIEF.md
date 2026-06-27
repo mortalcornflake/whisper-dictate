@@ -1,20 +1,22 @@
 # Brief for a Claude Code session on the Windows PC
 
-**You are a fresh Claude Code session running on a Windows 11 PC. You have no
-memory of the prior planning conversation and you're signed in under a different
-account.** This document, plus the files it points to, is everything you need.
-Read it fully before acting.
+**You are a Claude Code session running on a Windows 11 PC, picking up the Windows
+build of this project.** This document, plus the files it points to, is everything
+you need — read it fully before acting (you may have no memory of the prior work).
 
 ## What this project is
 
 Whisper Dictate: a push-to-talk dictation tool. Hold a hotkey, speak, release →
 it records the mic, transcribes with Whisper, and pastes the text at the cursor.
-It already works on macOS. **Your job is to make it work — and be friendly to
-install — on Windows.**
+It works on **both macOS and Windows today**. The Windows core (Phase 3) is done;
+what remains is **packaging it into a friendly installer (Phase 4) and user docs
+(Phase 5)**.
 
-The end user is **Yuen**, a non-technical person who owns this PC. She has an
-**NVIDIA GPU**. The finished Windows experience must be a **one-click installer +
-a visible system-tray app**, not an invisible background process.
+The eventual end user is **Yuen**, a non-technical person with an NVIDIA GPU — the
+finished Windows deliverable must be a **one-click installer + a visible
+system-tray app**. Active Windows development now happens on the **owner's own
+Windows PC** (so a fresh clone here should just work, and you can push to the
+owner's repo once git is set up).
 
 ## Read these, in order
 
@@ -22,53 +24,51 @@ a visible system-tray app**, not an invisible background process.
 2. **`docs/FASTER_WHISPER.md`** — the local transcription engine + GPU auto-detect.
 3. **`WINDOWS_SETUP.md`** — how to bootstrap Python/venv/deps on this machine.
 
-## Current state (do not redo)
+## Current state (DONE — do not redo)
 
-- **Phase 1 ✅** — macOS-specific OS calls are abstracted behind the `platform_io`
-  package. `platform_io/darwin.py` is the macOS implementation;
-  `platform_io/windows.py` is a **stub that raises NotImplementedError** — that's
-  your Phase 3 work.
-- **Phase 2 ✅** — `faster_whisper_backend.py` is the CUDA-capable local engine,
-  wired into `dictate.py` as `DICTATE_BACKEND=faster-whisper`, with hardware
-  auto-detection. Verified on CPU on the dev Mac; **not yet verified on this PC's
-  GPU — that's your first task.**
+- **Phase 1 ✅** — macOS OS calls abstracted behind the `platform_io` package.
+- **Phase 2 ✅** — `faster_whisper_backend.py`, the CUDA local engine, with
+  hardware auto-detection.
+- **Phase 3 ✅ (merged to `main`)** — `platform_io/windows.py` (winsound,
+  win11toast, pynput Ctrl+V), `tray_app.py` (pystray Idle/Recording icon +
+  Reset/Settings/Quit), Windows single-instance lock, event-based graceful
+  subprocess stop, encoding-safe logging, CUDA-DLL discovery, and
+  `start-dictate.vbs`/`.bat` for hidden auto-start. Verified end-to-end on a
+  Windows NVIDIA PC: Right Ctrl → CUDA transcription → paste.
+- **Review hardening ✅ (this session)** — platform-aware `HOTKEY` default
+  (`ctrl_r` on Windows), `requirements.txt` pyobjc markers so `pip install` works
+  on Windows, guarded `.env` int parsing, `multiprocessing.freeze_support()` for
+  PyInstaller, plus a `tests/` unit suite and a GitHub Actions CI matrix
+  (macOS + Windows).
 
-## The platform_io contract (what Phase 3 must implement)
+**First thing to do here:** clone, set up per `WINDOWS_SETUP.md`, and run
+`python check_setup.py` to confirm this PC's GPU is used (`device detected : cuda`),
+then `venv\Scripts\python.exe dictate.py` to confirm the app runs.
 
-`platform_io/__init__.py` selects the backend by `sys.platform` and re-exports
-these functions. Your `platform_io/windows.py` must implement all of them with
-the same signatures as `platform_io/darwin.py`:
+## What's left
 
-- `play_sound(event, blocking=False)` — `event` is one of `"start"`, `"stop"`,
-  `"done"`, `"warning"`. macOS maps these to system sounds; on Windows use
-  `winsound.PlaySound` with bundled `.wav` files (add them to the repo) or
-  `winsound.MessageBeep` as a fallback.
-- `notify(title, message)` — a desktop notification (use `win11toast` or `plyer`).
-- `send_paste()` — simulate **Ctrl+V** (use `pynput`'s `keyboard.Controller`).
-- `send_enter()` — simulate the Enter key (pynput).
-- `register_external_reset(callback)` — **no-op on Windows** (there's no SIGUSR1;
-  reset comes from the tray menu instead). The stub already does this correctly.
+**Phase 4 — friendly installer (the main remaining work).** Done so far: the
+auto-start launcher + single-instance lock. Still to do:
+- **PyInstaller** onedir build of `dictate.py`. Gotchas already handled in code:
+  `multiprocessing.freeze_support()` is in place; the spec must **bundle the
+  NVIDIA CUDA runtime DLLs** (`nvidia/<cublas|cudnn|cuda_nvrtc>/bin`) and
+  `tray_app.py` + `platform_io`.
+- **Inno Setup** `.exe` wizard: Start Menu + Desktop shortcuts, a "Run at login"
+  checkbox (writes the Startup shortcut), and uninstall.
+- **First-launch model download with a progress bar** — a fresh user otherwise
+  waits several silent minutes while faster-whisper pulls ~1.5 GB from Hugging
+  Face. Surface progress in the tray/a window.
+- **Code signing** (or at minimum document the SmartScreen "More info → Run
+  anyway" step for the unsigned `.exe`).
 
-## Your task list
+**Phase 5 — docs.** A dead-simple, non-technical Windows install/usage guide, and
+a cross-platform README rewrite (the dated "Windows port — status" block in the
+README should move into `CROSS_PLATFORM.md`).
 
-1. **Validate the GPU first (highest priority, lowest effort).** Follow
-   `WINDOWS_SETUP.md` to set up the venv and run `python check_setup.py`. Confirm
-   it reports `device detected : cuda` and transcribes correctly. Report the
-   result. If it falls back to CPU, debug the CUDA wheels / driver before moving
-   on — there's no point building UI on a broken engine.
-2. **Phase 3** — implement `platform_io/windows.py` (above) and a **`pystray`**
-   system-tray app: an icon showing Idle/Recording, with a right-click menu
-   (Quit, Reset, Settings). The tray's Reset replaces the macOS signal-based
-   reset. Resolve the hotkey: **Right Alt doubles as AltGr** on some layouts and
-   can misbehave — make the hotkey a first-run choice rather than a hard default.
-   Test the full `dictate.py` end-to-end on Windows.
-3. **Phase 4** — package with **PyInstaller** (onedir) and wrap with **Inno
-   Setup** into an `.exe` wizard (Start Menu shortcut + "Run at login" checkbox).
-   Have the model download on first launch with a progress indicator. Note: the
-   unsigned installer will trigger a "Windows protected your PC" SmartScreen
-   prompt — document the "More info → Run anyway" step for Yuen.
-4. **Phase 5** — write a dead-simple, non-technical Windows install guide for
-   Yuen, and update the README for cross-platform.
+**Nice-to-haves (optional, from the project review):** macOS menu-bar parity
+(`rumps`) so macOS gets the same visible icon; a real settings dialog instead of
+the tray "Settings" opening raw `.env`; `logging` with rotation instead of an
+ever-growing log file.
 
 ## Hard constraints
 
@@ -80,11 +80,8 @@ the same signatures as `platform_io/darwin.py`:
 
 ## Getting your work back to the repo
 
-This repo is **public**, so `git clone https://github.com/mortalcornflake/whisper-dictate`
-works without auth. **Pushing** back, however, needs write access — and this PC is
-likely signed in under a different GitHub account than the owner's. So:
-
-- Commit your work locally as you go (clear messages, keep macOS working).
-- **Do not assume you can push.** Confirm with the owner (Aaron) how to get changes
-  back — options are: he authenticates `gh`/git on this machine, you open a PR from
-  a fork, or you hand the diff back. Ask before pushing.
+The repo is public: `git clone https://github.com/mortalcornflake/whisper-dictate`
+works without auth. Windows development now runs on the **owner's own PC**, so once
+git is set up and authenticated here, commit and push to `main` normally (clear
+messages, keep macOS working — CI runs on macOS + Windows on every push). Do the
+Phase 4 packaging work on a branch if you want to keep `main` shippable.

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        # Installs the cross-platform deps + pytest. requirements.txt's pyobjc
+        # lines are marked macOS-only, so this also verifies they're skipped on
+        # Windows (regression test for the cross-platform install fix). The heavy
+        # GPU stack (requirements-windows.txt) is intentionally not installed —
+        # faster-whisper is imported lazily and the unit tests don't need it.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -q
