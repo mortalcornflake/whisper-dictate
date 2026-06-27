@@ -13,17 +13,55 @@ import even when the package isn't installed (e.g. on the macOS dev machine).
 """
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 
 
 def _log(msg):
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        # Some Windows consoles use a legacy code page (e.g. cp1252) that can't
+        # encode emoji; degrade gracefully instead of crashing the model load.
+        enc = sys.stdout.encoding or "utf-8"
+        print(msg.encode(enc, errors="replace").decode(enc), flush=True)
 
 
 # Lazily-loaded singleton model (loading is expensive; do it once).
 _model = None
 _model_lock = threading.Lock()
+
+
+def _add_cuda_dll_dirs():
+    """Make the pip-installed CUDA runtime DLLs loadable on Windows.
+
+    The nvidia-cublas-cu12 / nvidia-cudnn-cu12 wheels ship the CUDA DLLs inside
+    the venv (nvidia/<lib>/bin), but those folders aren't on Windows' DLL search
+    path, so ctranslate2 fails with "cublas64_12.dll is not found". Register them
+    explicitly before the model loads. No-op off Windows (macOS uses Metal/CPU)."""
+    if sys.platform != "win32":
+        return
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec("nvidia")
+        roots = list(spec.submodule_search_locations) if spec else []
+    except Exception:
+        roots = []
+    added = []
+    for root in roots:
+        for sub in ("cublas", "cudnn", "cuda_nvrtc"):
+            bindir = os.path.join(root, sub, "bin")
+            if os.path.isdir(bindir):
+                added.append(bindir)
+                try:
+                    os.add_dll_directory(bindir)
+                except OSError:
+                    pass
+    # These CUDA libraries load each other by bare name, which resolves via PATH;
+    # add_dll_directory alone isn't enough, so prepend the bin dirs to PATH too.
+    if added:
+        os.environ["PATH"] = os.pathsep.join(added) + os.pathsep + os.environ.get("PATH", "")
 
 
 def is_available() -> bool:
@@ -122,6 +160,9 @@ def _load_model():
                 "faster-whisper is not installed. Install it with: "
                 "pip install faster-whisper"
             )
+
+        # On Windows, make the pip-installed CUDA DLLs discoverable before load.
+        _add_cuda_dll_dirs()
 
         device = _detect_device()
         vram_gb = _detect_vram_gb() if device == "cuda" else None
