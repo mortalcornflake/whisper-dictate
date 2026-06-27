@@ -38,7 +38,20 @@ import faster_whisper_backend as fw_backend
 
 # Force unbuffered output
 def log(msg):
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        # Some Windows consoles / redirected logs use a legacy code page (cp1252)
+        # that can't encode emoji; degrade gracefully instead of crashing.
+        enc = sys.stdout.encoding or "utf-8"
+        print(msg.encode(enc, errors="replace").decode(enc), flush=True)
+
+
+def maybe_play_sound(event, blocking=False):
+    """Play a UI sound for a semantic event, unless sounds are turned off via
+    PLAY_SOUNDS=false in the .env."""
+    if PLAY_SOUNDS:
+        play_sound(event, blocking=blocking)
 
 
 def parse_hotkey(key_str):
@@ -46,6 +59,7 @@ def parse_hotkey(key_str):
     key_map = {
         'alt_r': keyboard.Key.alt_r,
         'alt_l': keyboard.Key.alt_l,
+        'alt_gr': keyboard.Key.alt_gr,  # Right Alt on many Windows keyboards
         'option_r': keyboard.Key.alt_r,  # macOS alias
         'option_l': keyboard.Key.alt_l,  # macOS alias
         'ctrl_r': keyboard.Key.ctrl_r,
@@ -69,6 +83,7 @@ def get_hotkey_name(key):
     name_map = {
         keyboard.Key.alt_r: "Right Option",
         keyboard.Key.alt_l: "Left Option",
+        keyboard.Key.alt_gr: "Right Alt (AltGr)",
         keyboard.Key.ctrl_r: "Right Control",
         keyboard.Key.ctrl_l: "Left Control",
         keyboard.Key.cmd_r: "Right Command",
@@ -90,6 +105,7 @@ HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", "alt_r"))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
+PLAY_SOUNDS = os.environ.get("PLAY_SOUNDS", "true").lower() in ("true", "1", "yes")  # UI sounds on/off
 AUTO_STOP_TIMEOUT = int(os.environ.get("AUTO_STOP_TIMEOUT", "300"))  # Seconds before auto-stop stuck recordings
 AUTO_STOP_WARNING = 10  # Seconds before auto-stop to play warning sound
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
@@ -100,8 +116,12 @@ CHANNELS = 1
 # Tip: Use a specific mic name to dictate through built-in mic while using AirPods for audio
 INPUT_DEVICE = os.environ.get("INPUT_DEVICE", None)  # None = system default
 
-# Transcription backend: "groq", "openai", or "local"
-BACKEND = os.environ.get("DICTATE_BACKEND", "local")
+# Transcription backend: "groq", "openai", "local", or "faster-whisper".
+# faster-whisper (CUDA) is the default on Windows; whisper.cpp ("local") on macOS.
+BACKEND = os.environ.get(
+    "DICTATE_BACKEND",
+    "faster-whisper" if sys.platform == "win32" else "local",
+)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -147,7 +167,7 @@ def _cleanup_all_subprocesses():
     stop_whisper_server()
 
 
-def recording_worker(output_path, device_name, sample_rate, channels, ready_event, go_event):
+def recording_worker(output_path, device_name, sample_rate, channels, ready_event, go_event, stop_event):
     """
     Worker function that runs in a subprocess to record audio.
     Spawned eagerly so imports are pre-loaded. Waits for go_event before recording.
@@ -202,8 +222,9 @@ def recording_worker(output_path, device_name, sample_rate, channels, ready_even
     ready_event.set()
 
     try:
-        # Record until signaled to stop
-        while not should_exit:
+        # Record until signaled to stop — via SIGTERM (macOS) or the stop_event
+        # (Windows, where terminate() is forceful and skips this cleanup/save).
+        while not should_exit and not stop_event.is_set():
             time.sleep(0.1)
     finally:
         # Save what we recorded before exiting
@@ -253,10 +274,11 @@ class Recorder:
         self.temp_file.close()
         self.ready_event = multiprocessing.Event()
         self.go_event = multiprocessing.Event()
+        self.stop_event = multiprocessing.Event()
         self.process = multiprocessing.Process(
             target=recording_worker,
             args=(self.temp_file.name, INPUT_DEVICE, SAMPLE_RATE, CHANNELS,
-                  self.ready_event, self.go_event)
+                  self.ready_event, self.go_event, self.stop_event)
         )
         self.process.start()
         with _all_recorder_processes_lock:
@@ -274,7 +296,7 @@ class Recorder:
         else:
             log("⚠️  Recording subprocess slow to start")
 
-        play_sound("start")
+        maybe_play_sound("start")
 
     def stop(self) -> bytes:
         """Stop recording subprocess and extract audio."""
@@ -284,15 +306,22 @@ class Recorder:
 
         log(f"⏹️  Stopping recording subprocess (duration: {duration:.1f}s)")
 
-        # Kill the subprocess
+        # Ask the subprocess to stop gracefully so it saves what it recorded.
+        # On macOS terminate() (SIGTERM) also triggers the save; on Windows
+        # terminate() is forceful and would skip it, so the event is essential.
         if self.process and self.process.is_alive():
-            log("🔫 Terminating recording subprocess...")
-            self.process.terminate()  # Send SIGTERM - subprocess will save and exit
-            self.process.join(timeout=5)  # Wait up to 5 seconds for clean shutdown
+            log("🛑 Signaling recording subprocess to stop...")
+            self.stop_event.set()
+            self.process.join(timeout=5)  # Wait for clean shutdown (saves audio)
+
+            if self.process.is_alive():
+                log("🔫 Terminating recording subprocess...")
+                self.process.terminate()
+                self.process.join(timeout=2)
 
             if self.process.is_alive():
                 log("💀 Force killing stuck subprocess...")
-                self.process.kill()  # SIGKILL - nuclear option
+                self.process.kill()  # nuclear option
                 self.process.join(timeout=2)
 
         with _all_recorder_processes_lock:
@@ -620,7 +649,7 @@ def paste_text(text: str):
         log("⏎  Pressed Enter")
 
     # Play sound AFTER clipboard operations complete
-    play_sound("done", blocking=True)
+    maybe_play_sound("done", blocking=True)
 
 
 class DictationListener:
@@ -648,6 +677,9 @@ class DictationListener:
                 self._standby_recorder = None
 
     def on_press(self, key):
+        # If the key is already held, this is an OS auto-repeat key-down (Windows
+        # repeats held keys; macOS doesn't), not a fresh press.
+        is_repeat = key in self.pressed_keys
         self.pressed_keys.add(key)
 
         # Check for reset combo: Ctrl+Shift+R
@@ -673,7 +705,13 @@ class DictationListener:
 
         # Toggle recording: press to start, press again to stop
         if key == HOTKEY_KEY:
-            # Debounce key-repeat events (ignore presses within 0.5s)
+            # Ignore auto-repeat key-downs while the key is held, so holding the
+            # key records continuously instead of toggling every half-second. A
+            # genuine second tap arrives only after a release (key cleared from
+            # pressed_keys), so it still works as a stop fallback.
+            if is_repeat:
+                return
+            # Debounce accidental double-fires.
             now = time.time()
             if now - self._last_hotkey_time < 0.5:
                 return
@@ -713,7 +751,7 @@ class DictationListener:
             try:
                 if old_recorder:
                     audio_bytes = old_recorder.stop()  # Kills subprocess, reads file
-                    play_sound("stop")  # Play after recording stops
+                    maybe_play_sound("stop")  # Play after recording stops
                     if audio_bytes:
                         self._process_audio(audio_bytes)
             except Exception as e:
@@ -776,7 +814,7 @@ class DictationListener:
         threading.Thread(target=kill_and_process, daemon=True).start()
 
         notify("Whisper Dictate", "Recorder reset - ready to record")
-        play_sound("done", blocking=True)
+        maybe_play_sound("done", blocking=True)
         log("✅ Recorder reset complete (subprocess will be killed)")
 
     def _auto_reset_check(self):
@@ -792,7 +830,7 @@ class DictationListener:
                 warning_at = AUTO_STOP_TIMEOUT - AUTO_STOP_WARNING
                 if not getattr(self, '_warning_played', False) and elapsed > warning_at:
                     self._warning_played = True
-                    play_sound("warning")
+                    maybe_play_sound("warning")
                     log(f"⚠️  Recording approaching limit ({AUTO_STOP_WARNING}s remaining)")
 
                 # Auto-reset and process the audio if stuck
@@ -806,7 +844,7 @@ class DictationListener:
         checker_thread = threading.Thread(target=self._auto_reset_check, daemon=True)
         checker_thread.start()
 
-    def run(self):
+    def _startup_banner(self):
         log("=" * 50)
         log("Whisper Dictate")
         log("=" * 50)
@@ -821,16 +859,60 @@ class DictationListener:
         # Show startup notification so user knows it's running
         notify("Whisper Dictate", f"Ready! Hold {get_hotkey_name(HOTKEY_KEY)} to dictate")
 
+    def run(self):
+        """Blocking run on the main thread (macOS path — no tray)."""
+        self._startup_banner()
         with keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release
         ) as listener:
             listener.join()
 
+    def start_listening(self):
+        """Start the keyboard listener WITHOUT blocking, so the caller can use
+        the main thread for something else (the Windows tray icon). Returns the
+        listener."""
+        self._startup_banner()
+        self._listener = keyboard.Listener(
+            on_press=self.on_press,
+            on_release=self.on_release,
+        )
+        self._listener.start()
+        return self._listener
+
+    def stop_listening(self):
+        """Stop the keyboard listener started by start_listening()."""
+        listener = getattr(self, "_listener", None)
+        if listener is not None:
+            listener.stop()
+
+
+def _acquire_single_instance_lock():
+    """Ensure only one instance runs on Windows — auto-start plus a manual launch
+    could otherwise run two copies that both type. Returns a handle to keep alive
+    for the process lifetime, or None. Exits if another instance already holds the
+    lock. No-op on non-Windows (macOS unaffected)."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    ERROR_ALREADY_EXISTS = 183
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, "Local\\WhisperDictateSingleton")
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        log("Another instance is already running - exiting this one.")
+        notify("Whisper Dictate", "Already running - see the tray icon by your clock.")
+        time.sleep(2)  # let the notification appear before we exit
+        sys.exit(0)
+    return handle
+
 
 def main():
     # Set multiprocessing start method for macOS
     multiprocessing.set_start_method('spawn', force=True)
+
+    # Only allow one running instance (Windows): keep the handle alive for the
+    # lifetime of main() so the lock is held until the app exits.
+    _single_instance_handle = _acquire_single_instance_lock()
 
     # Check for required configuration based on backend
     if BACKEND == "local":
@@ -900,11 +982,22 @@ def main():
         listener.reset(reason="External reset signal")
     register_external_reset(on_external_reset)
 
-    try:
-        listener.run()
-    except KeyboardInterrupt:
+    if sys.platform == "win32":
+        # Windows: the tray icon owns the main thread; the keyboard listener runs
+        # in the background. run_with_tray() blocks until the user picks Quit.
+        from tray_app import run_with_tray
+        try:
+            run_with_tray(listener)
+        except KeyboardInterrupt:
+            pass
         log("\n👋 Goodbye!")
         _cleanup_all_subprocesses()
+    else:
+        try:
+            listener.run()
+        except KeyboardInterrupt:
+            log("\n👋 Goodbye!")
+            _cleanup_all_subprocesses()
 
 
 if __name__ == "__main__":
