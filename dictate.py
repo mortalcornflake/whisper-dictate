@@ -81,9 +81,12 @@ def parse_hotkey(key_str):
 def get_hotkey_name(key):
     """Get friendly name for hotkey."""
     name_map = {
+        # alt_gr first: on macOS pynput aliases it to alt_r (same object), so the
+        # alt_r entry below must come last to win and show "Right Option". On
+        # Windows they're distinct keys, so both labels are correct.
+        keyboard.Key.alt_gr: "Right Alt (AltGr)",
         keyboard.Key.alt_r: "Right Option",
         keyboard.Key.alt_l: "Left Option",
-        keyboard.Key.alt_gr: "Right Alt (AltGr)",
         keyboard.Key.ctrl_r: "Right Control",
         keyboard.Key.ctrl_l: "Left Control",
         keyboard.Key.cmd_r: "Right Command",
