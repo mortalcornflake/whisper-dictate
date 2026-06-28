@@ -107,14 +107,14 @@ def get_active_app():
     return NSWorkspace.sharedWorkspace().frontmostApplication().localizedName()
 ```
 
-### Menu Bar UI
-Replace background process with proper menu bar app:
-- Show recording status
-- Toggle cleanup on/off
-- See recent transcriptions
-- Quick access to settings
-
-Libraries: `rumps` or `pyobjc` AppKit (full control)
+### Menu Bar UI — DONE (Jun 2026)
+Built as `menubar_app.py` using `rumps`, the macOS counterpart to the Windows
+tray (`tray_app.py`). Owns the main thread while the keyboard listener runs in a
+background thread. Shows recording state (mic / red-dot / paused glyph in the
+bar), a live recording timer, a last-transcription preview + copy action,
+Pause/Resume listening, Reset, and quick access to settings (`.env`) and the log.
+Enabled by default on macOS; set `MENU_BAR=false` to run headless. Falls back to
+headless automatically if `rumps` isn't installed.
 
 ### Voice Commands
 Prefix phrases that trigger actions:
@@ -146,6 +146,8 @@ Option to auto-detect speech start/stop instead of holding key:
 - [x] Toggle mode (press again to stop — fixes lost key release events)
 - [x] Auto-stop safety timeout (configurable via AUTO_STOP_TIMEOUT)
 - [x] Server mode with auto-cleanup (30min idle timeout)
+- [x] macOS menu bar app (`menubar_app.py`, rumps) — Jun 2026
+- [x] Windows tray app (`tray_app.py`, pystray)
 
 ## Technical Debt
 

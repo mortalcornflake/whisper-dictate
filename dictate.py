@@ -680,6 +680,7 @@ class DictationListener:
     def __init__(self):
         self.recorder = None
         self.is_recording = False
+        self.last_transcription = ""  # most recent pasted text (for menu bar UI)
         self.pressed_keys = set()
         self._standby_recorder = None
         self._standby_lock = threading.Lock()
@@ -786,6 +787,7 @@ class DictationListener:
     def _process_audio(self, audio_bytes: bytes):
         text = transcribe(audio_bytes).strip()
         if text:
+            self.last_transcription = text
             paste_text(text)
         # Pre-spawn next standby recorder so it's ready for the next recording
         self._prepare_standby()
@@ -1017,11 +1019,45 @@ def main():
         log("\n👋 Goodbye!")
         _cleanup_all_subprocesses()
     else:
-        try:
-            listener.run()
-        except KeyboardInterrupt:
+        # macOS: the menu bar app owns the main thread (Cocoa requires it) while
+        # the keyboard listener runs in the background, mirroring the Windows tray.
+        # Falls back to the headless listener if rumps isn't installed or the menu
+        # bar is disabled via MENU_BAR=false.
+        use_menubar = (
+            sys.platform == "darwin"
+            and os.environ.get("MENU_BAR", "true").lower() in ("true", "1", "yes")
+        )
+        if use_menubar:
+            try:
+                from menubar_app import run_with_menubar
+            except ImportError as e:
+                log(f"⚠️  Menu bar unavailable ({e}) - install rumps to enable it. "
+                    "Running headless.")
+                use_menubar = False
+        if use_menubar:
+            # Cocoa's terminate (on Quit) exits the process without returning, so
+            # teardown runs in this callback rather than after run_with_menubar().
+            def menubar_quit():
+                log("\n👋 Goodbye!")
+                listener.stop_listening()
+                _cleanup_all_subprocesses()
+            try:
+                run_with_menubar(
+                    listener,
+                    hotkey_name=get_hotkey_name(HOTKEY_KEY),
+                    log_path=os.path.expanduser("~/whisper-dictate.log"),
+                    on_quit=menubar_quit,
+                )
+            except KeyboardInterrupt:
+                pass
             log("\n👋 Goodbye!")
             _cleanup_all_subprocesses()
+        else:
+            try:
+                listener.run()
+            except KeyboardInterrupt:
+                log("\n👋 Goodbye!")
+                _cleanup_all_subprocesses()
 
 
 if __name__ == "__main__":
