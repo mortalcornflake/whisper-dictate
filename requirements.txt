@@ -14,6 +14,8 @@ pyobjc-framework-CoreText==12.0; sys_platform == "darwin"
 pyobjc-framework-Quartz==12.0; sys_platform == "darwin"
 pyperclip==1.11.0
 python-dotenv==1.2.1
+# rumps powers the macOS menu bar app (menubar_app.py); macOS-only, like pyobjc.
+rumps==0.4.0; sys_platform == "darwin"
 requests==2.32.5
 six==1.17.0
 sounddevice==0.5.3

@@ -452,7 +452,6 @@ Restart if needed:
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for planned features:
-- Menu bar UI with recording status indicator
 - Language selection (Whisper supports 99 languages)
 - LLM transcript cleanup (remove filler words, fix punctuation)
 - Context-aware formatting per app
