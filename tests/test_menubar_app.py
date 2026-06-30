@@ -53,3 +53,37 @@ def test_ensure_env_file_no_example(tmp_path):
     env_path = m.ensure_env_file(str(tmp_path))
     assert env_path == os.path.join(str(tmp_path), ".env")
     assert not os.path.exists(env_path)
+
+
+def test_upsert_env_line_replaces_existing():
+    content = "A=1\nSOUND_STOP=true\nB=2\n"
+    assert m.upsert_env_line(content, "SOUND_STOP", "false") == "A=1\nSOUND_STOP=false\nB=2\n"
+
+
+def test_upsert_env_line_appends_when_missing():
+    assert m.upsert_env_line("A=1\n", "SOUND_DONE", "false") == "A=1\nSOUND_DONE=false\n"
+
+
+def test_upsert_env_line_empty_content():
+    assert m.upsert_env_line("", "SOUND_START", "true") == "SOUND_START=true\n"
+
+
+def test_upsert_env_line_ignores_commented_line():
+    # A commented example line is left intact; a real assignment is appended.
+    content = "# SOUND_START=true\n"
+    assert m.upsert_env_line(content, "SOUND_START", "false") == "# SOUND_START=true\nSOUND_START=false\n"
+
+
+def test_upsert_env_line_no_trailing_newline_preserved():
+    # Input without a trailing newline stays without one after an in-place edit.
+    assert m.upsert_env_line("SOUND_STOP=true", "SOUND_STOP", "false") == "SOUND_STOP=false"
+
+
+def test_persist_env_setting_roundtrip(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("DICTATE_BACKEND=local\n")
+    m.persist_env_setting(str(env), "SOUND_STOP", "false")
+    assert env.read_text() == "DICTATE_BACKEND=local\nSOUND_STOP=false\n"
+    # A second toggle replaces rather than duplicating.
+    m.persist_env_setting(str(env), "SOUND_STOP", "true")
+    assert env.read_text() == "DICTATE_BACKEND=local\nSOUND_STOP=true\n"
