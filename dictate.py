@@ -47,9 +47,11 @@ def log(msg):
 
 
 def maybe_play_sound(event, blocking=False):
-    """Play a UI sound for a semantic event, unless sounds are turned off via
-    PLAY_SOUNDS=false in the .env."""
-    if PLAY_SOUNDS:
+    """Play a UI sound for a semantic event, unless that event's sound is turned
+    off. Each event ('start'/'stop'/'done'/'warning') has its own toggle in
+    SOUNDS_ENABLED, set from the SOUND_<EVENT> env vars and live-togglable from the
+    menu bar. The legacy PLAY_SOUNDS=false still silences everything."""
+    if SOUNDS_ENABLED.get(event, False):
         play_sound(event, blocking=blocking)
 
 
@@ -64,6 +66,14 @@ def _env_int(name, default):
     except ValueError:
         log(f"⚠️  Invalid {name}={raw!r} in .env; using default {default}")
         return default
+
+
+def _env_bool(name, default):
+    """Parse a boolean env var ('true'/'1'/'yes' = True). Missing/blank -> default."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("true", "1", "yes")
 
 
 def parse_hotkey(key_str):
@@ -123,7 +133,15 @@ HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", _DEFAULT_HOTKEY))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
 PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
 AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
-PLAY_SOUNDS = os.environ.get("PLAY_SOUNDS", "true").lower() in ("true", "1", "yes")  # UI sounds on/off
+PLAY_SOUNDS = _env_bool("PLAY_SOUNDS", True)  # master switch (back-compat); per-event below
+# Per-event sound toggles. Each defaults to the PLAY_SOUNDS master switch, so
+# PLAY_SOUNDS=false still mutes everything, while SOUND_START / SOUND_STOP /
+# SOUND_DONE / SOUND_WARNING override individual events in .env. The menu bar
+# mutates this dict in place to toggle sounds live (see menubar_app.py).
+SOUND_EVENTS = ("start", "stop", "done", "warning")
+SOUNDS_ENABLED = {
+    event: _env_bool(f"SOUND_{event.upper()}", PLAY_SOUNDS) for event in SOUND_EVENTS
+}
 AUTO_STOP_TIMEOUT = _env_int("AUTO_STOP_TIMEOUT", 300)  # Seconds before auto-stop stuck recordings
 AUTO_STOP_WARNING = 10  # Seconds before auto-stop to play warning sound
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
@@ -1047,6 +1065,7 @@ def main():
                     hotkey_name=get_hotkey_name(HOTKEY_KEY),
                     log_path=os.path.expanduser("~/whisper-dictate.log"),
                     on_quit=menubar_quit,
+                    sound_config=SOUNDS_ENABLED,
                 )
             except KeyboardInterrupt:
                 pass

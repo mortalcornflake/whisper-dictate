@@ -66,6 +66,49 @@ def _open_in_editor(path):
         pass
 
 
+# Friendly labels for the per-event sound toggles, in menu order.
+_SOUND_LABELS = (
+    ("start", "Start (key press)"),
+    ("stop", "Stop (key release)"),
+    ("done", "Done (transcription pasted)"),
+    ("warning", "Warning (near auto-stop)"),
+)
+
+
+def upsert_env_line(content, key, value):
+    """Return ``.env`` ``content`` with ``KEY=value`` set: replace the first
+    uncommented ``KEY=`` line if present, otherwise append one. Commented example
+    lines are left intact. Pure string transform so it stays unit-testable."""
+    lines = content.splitlines()
+    new_line = f"{key}={value}"
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(f"{key}=") and not stripped.startswith("#"):
+            lines[i] = new_line
+            break
+    else:
+        lines.append(new_line)
+    text = "\n".join(lines)
+    if content == "" or content.endswith("\n"):
+        text += "\n"
+    return text
+
+
+def persist_env_setting(env_path, key, value):
+    """Best-effort write of ``KEY=value`` into the ``.env`` file so a menu-bar
+    sound toggle survives a restart. Silently no-ops on any I/O error."""
+    try:
+        with open(env_path, "r") as f:
+            content = f.read()
+    except OSError:
+        content = ""
+    try:
+        with open(env_path, "w") as f:
+            f.write(upsert_env_line(content, key, value))
+    except OSError:
+        pass
+
+
 try:
     import rumps
 except ImportError:  # not macOS / not installed — keep the module importable
@@ -77,13 +120,18 @@ if rumps is not None:
     class _WhisperDictateMenuBar(rumps.App):
         """rumps app that polls the listener and reflects its state in the bar."""
 
-        def __init__(self, listener, hotkey_name, repo_dir, log_path, on_quit):
+        def __init__(self, listener, hotkey_name, repo_dir, log_path, on_quit,
+                     sound_config=None):
             super().__init__("Whisper Dictate", title=IDLE_GLYPH, quit_button=None)
             self._listener = listener
             self._hotkey_name = hotkey_name or "the hotkey"
             self._repo_dir = repo_dir
             self._log_path = log_path
             self._on_quit_cb = on_quit
+            # Same dict object as dictate.SOUNDS_ENABLED — mutating it here changes
+            # what the core plays, with no UI->core coupling beyond this handle.
+            self._sound_config = sound_config if sound_config is not None else {}
+            self._env_path = os.path.join(repo_dir, ".env")
             self._rec_started = None
             self._was_recording = False
             self._paused = False
@@ -98,6 +146,18 @@ if rumps is not None:
             self._pause_item = rumps.MenuItem(
                 "Pause listening", callback=self._on_pause)
 
+            # Per-event sound toggles — a checkmark submenu that flips
+            # self._sound_config (shared with the core) and persists to .env.
+            self._sounds_menu = rumps.MenuItem("Sounds")
+            self._sound_items = {}
+            for event, label in _SOUND_LABELS:
+                if event not in self._sound_config:
+                    continue
+                item = rumps.MenuItem(label, callback=self._make_sound_toggle(event))
+                item.state = 1 if self._sound_config[event] else 0
+                self._sounds_menu.add(item)
+                self._sound_items[event] = item
+
             self.menu = [
                 self._status,
                 None,
@@ -106,6 +166,7 @@ if rumps is not None:
                 None,
                 self._pause_item,
                 rumps.MenuItem("Reset recorder", callback=self._on_reset),
+                self._sounds_menu,
                 None,
                 rumps.MenuItem("Open settings (.env)…", callback=self._on_settings),
                 rumps.MenuItem("Open log…", callback=self._on_log),
@@ -167,6 +228,19 @@ if rumps is not None:
         def _on_reset(self, _item):
             self._listener.reset(reason="Menu bar reset")
 
+        def _make_sound_toggle(self, event):
+            """Build the callback for one sound's menu item. Flips the shared
+            config (so the core plays/mutes it immediately), updates the checkmark,
+            and persists the choice to .env so it sticks across restarts."""
+            def _toggle(item):
+                enabled = not self._sound_config.get(event, False)
+                self._sound_config[event] = enabled
+                item.state = 1 if enabled else 0
+                persist_env_setting(
+                    self._env_path, f"SOUND_{event.upper()}",
+                    "true" if enabled else "false")
+            return _toggle
+
         def _on_settings(self, _item):
             _open_in_editor(ensure_env_file(self._repo_dir))
 
@@ -194,15 +268,18 @@ if rumps is not None:
             rumps.quit_application()
 
 
-def run_with_menubar(listener, hotkey_name=None, log_path=None, on_quit=None):
+def run_with_menubar(listener, hotkey_name=None, log_path=None, on_quit=None,
+                     sound_config=None):
     """Run the keyboard listener (background thread) plus the menu bar app (this
     thread). Blocks until the user chooses Quit. ``on_quit`` is invoked from the
     Quit handler for teardown (stop listener, kill subprocesses) because Cocoa's
-    terminate exits the process without returning here. Raises RuntimeError if
-    rumps isn't available."""
+    terminate exits the process without returning here. ``sound_config`` is the
+    core's live per-event sound dict (dictate.SOUNDS_ENABLED), shown as a toggle
+    submenu. Raises RuntimeError if rumps isn't available."""
     if rumps is None:
         raise RuntimeError("rumps is not installed — macOS menu bar unavailable")
     repo_dir = os.path.dirname(os.path.abspath(__file__))
     listener.start_listening()
-    app = _WhisperDictateMenuBar(listener, hotkey_name, repo_dir, log_path, on_quit)
+    app = _WhisperDictateMenuBar(listener, hotkey_name, repo_dir, log_path, on_quit,
+                                 sound_config=sound_config)
     app.run()
