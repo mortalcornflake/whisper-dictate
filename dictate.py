@@ -169,6 +169,9 @@ LIVE_SETTINGS = {
     "hands_free": _env_bool("HANDS_FREE", True),
     "preserve_clipboard": _env_bool("PRESERVE_CLIPBOARD", True),
     "auto_press_enter": _env_bool("AUTO_PRESS_ENTER", False),
+    # Collapse whisper's per-segment line breaks into one block (how short clips
+    # always looked). Turn off to keep the raw line breaks. Default on.
+    "single_line": _env_bool("SINGLE_LINE", True),
 }
 # Modifier you hold together with the hotkey to start a hands-free (latched)
 # recording: shift (default), ctrl, cmd, or alt. Matches either left/right variant.
@@ -634,6 +637,13 @@ def _is_hallucination(text: str) -> bool:
     return text.strip().lower() in HALLUCINATION_PHRASES
 
 
+def collapse_whitespace(text: str) -> str:
+    """Collapse all runs of whitespace (incl. the newlines whisper emits between
+    speech segments) into single spaces, so a long dictation pastes as one block
+    instead of many lines. Empty/whitespace-only -> ''."""
+    return " ".join(text.split())
+
+
 def transcribe_local_fallback(audio_bytes: bytes) -> str:
     """Transcribe with whichever local engine is available — whisper.cpp if it's
     installed (macOS default), otherwise faster-whisper (Windows default). Used as
@@ -861,6 +871,8 @@ class DictationListener:
 
     def _process_audio(self, audio_bytes: bytes):
         text = transcribe(audio_bytes).strip()
+        if LIVE_SETTINGS["single_line"]:
+            text = collapse_whitespace(text)
         if text:
             self.last_transcription = text
             paste_text(text)

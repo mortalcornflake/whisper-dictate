@@ -91,6 +91,15 @@ def test_resolve_modifier_keys_excludes_hotkey():
     assert keyboard.Key.ctrl_r not in keys
 
 
+def test_collapse_whitespace():
+    # Segment line breaks from whisper become single spaces -> one block.
+    assert dictate.collapse_whitespace("one\ntwo\nthree") == "one two three"
+    assert dictate.collapse_whitespace("  a \n\n  b  ") == "a b"
+    assert dictate.collapse_whitespace("") == ""
+    assert dictate.collapse_whitespace("\n \n") == ""
+    assert dictate.collapse_whitespace("already one block") == "already one block"
+
+
 def test_should_latch():
     mods = {keyboard.Key.shift, keyboard.Key.shift_l}
     # Enabled + a modifier held -> latch.
