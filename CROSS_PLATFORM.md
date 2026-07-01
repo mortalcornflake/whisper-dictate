@@ -112,6 +112,31 @@ Each phase keeps the macOS app working at every commit.
 - [ ] **Phase 5 — Docs.** Cross-platform README + a dead-simple Windows install
   guide for a non-technical user. (Move the dated "Windows port — status" block
   out of the README into this file.)
+- [ ] **Phase 6 — Windows tray parity with the macOS menu (NEW, Jun 2026).** The
+  macOS menu bar (`menubar_app.py`) grew a lot of UI that the Windows tray
+  (`tray_app.py`) does NOT yet have. **The underlying features are all in the
+  cross-platform core and already work on Windows — only the tray *menu* is
+  behind.** Bring `tray_app.py` up to parity (pystray supports checkbox items via
+  `MenuItem(..., checked=lambda item: <bool>)` and radio groups via `radio=True`):
+  - **Sounds submenu** — toggle each key in `dictate.SOUNDS_ENABLED` live +
+    persist to `.env`.
+  - **Hands-free toggle + Pasting toggles** — the three `dictate.LIVE_SETTINGS`
+    booleans (`hands_free`, `preserve_clipboard`, `auto_press_enter`), live +
+    persisted. (Hands-free latch itself is core logic and already works: hold
+    Shift + tap the hotkey to start, tap the hotkey to stop. On Windows pynput
+    reports `shift_l`/`shift_r`; `resolve_modifier_keys("shift")` already covers
+    both — verify on the PC.)
+  - **Transcription backend** radio — write `DICTATE_BACKEND`, then a toast saying
+    "restart to apply" (backend is read once at startup).
+  - **Help & about** — mirror macOS: write the guide to a temp `.txt` and
+    `os.startfile()` it (Notepad), rather than a modal dialog.
+  - **Plumbing:** `run_with_tray()` must accept `sound_config`, `live_settings`,
+    `backend`, `hotkey_name`, `hands_free_modifier` (like `run_with_menubar`), and
+    `dictate.py`'s win32 branch must pass them. The pure `.env` helpers
+    (`upsert_env_line` / `persist_env_setting` / `ensure_env_file`) currently live
+    in `menubar_app.py` — **extract them to a shared, import-safe module** (e.g.
+    `settings_io.py`) so the tray can reuse them without importing the rumps
+    module. Keep it additive; don't break macOS.
 
 ### Testing & CI (added during the project review)
 

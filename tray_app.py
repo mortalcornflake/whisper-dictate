@@ -4,6 +4,15 @@ Shows a tray icon (grey = idle, red = recording) with a right-click menu
 (Reset / Settings / Quit). Windows-only; the macOS build keeps running the
 keyboard listener on the main thread without a tray. The tray's Reset replaces
 the SIGUSR1-based external reset, which doesn't exist on Windows.
+
+PARITY TODO (Phase 6 — see CROSS_PLATFORM.md): the macOS menu bar
+(`menubar_app.py`) has since gained a hands-free toggle, a Sounds submenu, Pasting
+toggles, a Transcription-backend radio, and Help & about. Those features are all
+in the cross-platform core and ALREADY WORK on Windows — only this tray menu is
+behind. Mirror `menubar_app.py` here with pystray checkbox items
+(`MenuItem(..., checked=lambda item: <bool>)`) and radio groups, wiring them to
+`dictate.SOUNDS_ENABLED` / `dictate.LIVE_SETTINGS` and persisting via the (to be
+extracted) shared `.env` helpers. Keep it additive; do not touch macOS.
 """
 import os
 import threading
