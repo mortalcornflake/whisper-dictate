@@ -65,9 +65,19 @@ auto-start launcher + single-instance lock. Still to do:
 a cross-platform README rewrite (the dated "Windows port — status" block in the
 README should move into `CROSS_PLATFORM.md`).
 
-**Nice-to-haves (optional, from the project review):** macOS menu-bar parity
-(`rumps`) so macOS gets the same visible icon; a real settings dialog instead of
-the tray "Settings" opening raw `.env`; `logging` with rotation instead of an
+**Phase 6 — Windows tray parity with the macOS menu (NEW, see `CROSS_PLATFORM.md`).**
+Since this brief was written, macOS grew a much richer menu (`menubar_app.py`):
+a **hands-free/latched recording** toggle, per-event **Sounds** submenu, **Pasting**
+toggles, a **Transcription backend** radio, and a **Help & about** guide. **All the
+behaviour is in the cross-platform core, so it already works on Windows — only the
+tray *menu* (`tray_app.py`) is behind.** Use `menubar_app.py` as the reference
+implementation and mirror it with pystray checkbox/radio items (details + the
+suggested `settings_io.py` helper extraction are in `CROSS_PLATFORM.md` Phase 6).
+Specifically verify on the PC that **hands-free** works: hold Shift + tap the
+hotkey (Right Ctrl) to start a latched recording, tap the hotkey again to stop.
+
+**Nice-to-haves (optional, from the project review):** a real settings dialog
+instead of "Settings" opening raw `.env`; `logging` with rotation instead of an
 ever-growing log file.
 
 ## Hard constraints
