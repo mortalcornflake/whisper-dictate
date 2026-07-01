@@ -137,7 +137,7 @@ if rumps is not None:
 
         def __init__(self, listener, hotkey_name, repo_dir, log_path, on_quit,
                      sound_config=None, live_settings=None, backend=None,
-                     hands_free_modifier="shift"):
+                     hands_free_modifier="shift", recordings_dir=None):
             super().__init__("Whisper Dictate", title=IDLE_GLYPH, quit_button=None)
             self._listener = listener
             self._hotkey_name = hotkey_name or "the hotkey"
@@ -151,6 +151,7 @@ if rumps is not None:
             self._sound_config = sound_config if sound_config is not None else {}
             self._live_settings = live_settings if live_settings is not None else {}
             self._backend = backend  # informational; changing it needs a restart
+            self._recordings_dir = recordings_dir
             self._env_path = os.path.join(repo_dir, ".env")
             self._rec_started = None
             self._was_recording = False
@@ -188,6 +189,15 @@ if rumps is not None:
                     callback=self._make_toggle(
                         self._live_settings, "hands_free", "HANDS_FREE"))
                 self._handsfree_item.state = 1 if self._live_settings["hands_free"] else 0
+
+            # Save-recordings toggle — top-level so the archive is easy to find.
+            self._save_rec_item = None
+            if "save_recordings" in self._live_settings:
+                self._save_rec_item = rumps.MenuItem(
+                    "Save recordings (audio + text)",
+                    callback=self._make_toggle(
+                        self._live_settings, "save_recordings", "SAVE_RECORDINGS"))
+                self._save_rec_item.state = 1 if self._live_settings["save_recordings"] else 0
 
             # Pasting behaviour toggles.
             self._options_menu = rumps.MenuItem("Pasting")
@@ -227,12 +237,14 @@ if rumps is not None:
                 self._pause_item,
                 rumps.MenuItem("Reset recorder", callback=self._on_reset),
                 None,
-            ] + ([self._handsfree_item] if self._handsfree_item else []) + [
+            ] + ([self._handsfree_item] if self._handsfree_item else []) + (
+                [self._save_rec_item] if self._save_rec_item else []) + [
                 self._sounds_menu,
                 self._options_menu,
                 self._backend_menu,
                 None,
                 rumps.MenuItem("Help & about…", callback=self._on_help),
+                rumps.MenuItem("Open recordings folder…", callback=self._on_open_recordings),
                 rumps.MenuItem("Edit config file (.env)…", callback=self._on_settings),
                 rumps.MenuItem("Open log…", callback=self._on_log),
                 None,
@@ -337,6 +349,9 @@ if rumps is not None:
                 "SOUNDS & PASTING  ·  Use the Sounds and Pasting submenus to turn cues,",
                 "clipboard-preserve, and auto-Enter on/off. Changes save instantly.",
                 "",
+                "SAVE RECORDINGS  ·  Turn on “Save recordings” to keep a copy of every",
+                "clip's audio + transcript. “Open recordings folder” browses them.",
+                "",
                 "BACKEND  ·  Transcription backend submenu switches Local/Groq/OpenAI/"
                 "faster-whisper (needs a restart).",
                 "",
@@ -366,6 +381,19 @@ if rumps is not None:
         def _on_settings(self, _item):
             _open_in_editor(ensure_env_file(self._repo_dir))
 
+        def _on_open_recordings(self, _item):
+            """Open the recordings archive folder in Finder (creating it if the
+            user hasn't recorded anything yet)."""
+            path = self._recordings_dir
+            if not path:
+                return
+            try:
+                os.makedirs(path, exist_ok=True)
+                subprocess.Popen(["open", path],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
+
         def _on_log(self, _item):
             for candidate in (self._log_path,
                               os.path.join(self._repo_dir, "dictate.log")):
@@ -392,7 +420,7 @@ if rumps is not None:
 
 def run_with_menubar(listener, hotkey_name=None, log_path=None, on_quit=None,
                      sound_config=None, live_settings=None, backend=None,
-                     hands_free_modifier="shift"):
+                     hands_free_modifier="shift", recordings_dir=None):
     """Run the keyboard listener (background thread) plus the menu bar app (this
     thread). Blocks until the user chooses Quit. ``on_quit`` is invoked from the
     Quit handler for teardown (stop listener, kill subprocesses) because Cocoa's
@@ -406,5 +434,6 @@ def run_with_menubar(listener, hotkey_name=None, log_path=None, on_quit=None,
     listener.start_listening()
     app = _WhisperDictateMenuBar(listener, hotkey_name, repo_dir, log_path, on_quit,
                                  sound_config=sound_config, live_settings=live_settings,
-                                 backend=backend, hands_free_modifier=hands_free_modifier)
+                                 backend=backend, hands_free_modifier=hands_free_modifier,
+                                 recordings_dir=recordings_dir)
     app.run()
