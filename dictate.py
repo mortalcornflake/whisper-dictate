@@ -7,6 +7,7 @@ Hold the hotkey, speak, release to transcribe and paste.
 import io
 import os
 import sys
+import json
 import time
 import wave
 import atexit
@@ -172,7 +173,16 @@ LIVE_SETTINGS = {
     # Collapse whisper's per-segment line breaks into one block (how short clips
     # always looked). Turn off to keep the raw line breaks. Default on.
     "single_line": _env_bool("SINGLE_LINE", True),
+    # Keep a copy of every recording's audio + transcript in RECORDINGS_DIR.
+    # Off by default (saving all your audio is a deliberate choice); the menu bar
+    # has a toggle and an "Open recordings folder" item.
+    "save_recordings": _env_bool("SAVE_RECORDINGS", False),
 }
+# Where archived recordings go when save_recordings is on. Each recording writes
+# a <timestamp>.wav (16kHz mono, ~2MB/min) + <timestamp>.txt, and appends a row to
+# index.jsonl for easy searching.
+RECORDINGS_DIR = os.path.expanduser(
+    os.environ.get("RECORDINGS_DIR", "~/whisper-dictate-recordings"))
 # Modifier you hold together with the hotkey to start a hands-free (latched)
 # recording: shift (default), ctrl, cmd, or alt. Matches either left/right variant.
 HANDS_FREE_MODIFIER = os.environ.get("HANDS_FREE_MODIFIER", "shift")
@@ -644,6 +654,42 @@ def collapse_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
+def _recording_basename(now):
+    """Timestamp base (to the millisecond) for an archived recording, e.g.
+    '2026-07-01_17-30-45_123'. Millisecond suffix avoids same-second collisions."""
+    stamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(now))
+    return f"{stamp}_{int((now % 1) * 1000):03d}"
+
+
+def archive_recording(audio_bytes: bytes, text: str, when=None):
+    """Save a recording's WAV audio + transcript into RECORDINGS_DIR and append a
+    row to index.jsonl. Best-effort — archiving must never break dictation, so all
+    errors are logged and swallowed. Returns the basename written, or None."""
+    if not audio_bytes:
+        return None
+    when = time.time() if when is None else when
+    try:
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        base = _recording_basename(when)
+        with open(os.path.join(RECORDINGS_DIR, base + ".wav"), "wb") as f:
+            f.write(audio_bytes)
+        with open(os.path.join(RECORDINGS_DIR, base + ".txt"), "w", encoding="utf-8") as f:
+            f.write(text or "")
+        row = {
+            "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(when)),
+            "audio": base + ".wav",
+            "text": text or "",
+            "audio_bytes": len(audio_bytes),
+        }
+        with open(os.path.join(RECORDINGS_DIR, "index.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        log(f"🗄️  Archived recording → {base}.wav")
+        return base
+    except Exception as e:
+        log(f"⚠️  Failed to archive recording: {e}")
+        return None
+
+
 def transcribe_local_fallback(audio_bytes: bytes) -> str:
     """Transcribe with whichever local engine is available — whisper.cpp if it's
     installed (macOS default), otherwise faster-whisper (Windows default). Used as
@@ -873,6 +919,10 @@ class DictationListener:
         text = transcribe(audio_bytes).strip()
         if LIVE_SETTINGS["single_line"]:
             text = collapse_whitespace(text)
+        # Archive the original audio + transcript for every recording (even ones
+        # that transcribed to nothing), before pasting, if enabled.
+        if LIVE_SETTINGS["save_recordings"]:
+            archive_recording(audio_bytes, text)
         if text:
             self.last_transcription = text
             paste_text(text)
@@ -1139,6 +1189,7 @@ def main():
                     live_settings=LIVE_SETTINGS,
                     backend=BACKEND,
                     hands_free_modifier=HANDS_FREE_MODIFIER,
+                    recordings_dir=RECORDINGS_DIR,
                 )
             except KeyboardInterrupt:
                 pass

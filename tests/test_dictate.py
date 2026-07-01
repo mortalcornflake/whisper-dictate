@@ -100,6 +100,30 @@ def test_collapse_whitespace():
     assert dictate.collapse_whitespace("already one block") == "already one block"
 
 
+def test_archive_recording(tmp_path, monkeypatch):
+    monkeypatch.setattr(dictate, "RECORDINGS_DIR", str(tmp_path))
+    # Fixed timestamp so the basename is deterministic.
+    when = 1751385600.123  # 2025-07-01 in local time; ms suffix from .123
+    base = dictate.archive_recording(b"RIFFfakewav", "hello world", when=when)
+    assert base is not None
+    assert (tmp_path / (base + ".wav")).read_bytes() == b"RIFFfakewav"
+    assert (tmp_path / (base + ".txt")).read_text(encoding="utf-8") == "hello world"
+    # index.jsonl gets one JSON row with the transcript + byte count.
+    import json as _json
+    rows = (tmp_path / "index.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 1
+    row = _json.loads(rows[0])
+    assert row["text"] == "hello world"
+    assert row["audio"] == base + ".wav"
+    assert row["audio_bytes"] == len(b"RIFFfakewav")
+
+
+def test_archive_recording_empty_audio_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(dictate, "RECORDINGS_DIR", str(tmp_path))
+    assert dictate.archive_recording(b"", "text") is None
+    assert list(tmp_path.iterdir()) == []  # nothing written
+
+
 def test_should_latch():
     mods = {keyboard.Key.shift, keyboard.Key.shift_l}
     # Enabled + a modifier held -> latch.
