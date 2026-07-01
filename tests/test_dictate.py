@@ -60,3 +60,42 @@ def test_env_int_fallback(monkeypatch):
     assert dictate._env_int("SOME_INT", 300) == 45
     monkeypatch.delenv("SOME_INT", raising=False)
     assert dictate._env_int("SOME_INT", 300) == 300
+
+
+def test_env_bool():
+    import os
+    for val, expected in (("true", True), ("1", True), ("YES", True),
+                          ("false", False), ("0", False), ("", None), ("nonsense", False)):
+        if val == "":
+            os.environ.pop("SOME_BOOL", None)
+            assert dictate._env_bool("SOME_BOOL", "DEFAULT") == "DEFAULT"  # missing -> default
+        else:
+            os.environ["SOME_BOOL"] = val
+            assert dictate._env_bool("SOME_BOOL", False) is expected
+    os.environ.pop("SOME_BOOL", None)
+
+
+def test_resolve_modifier_keys_shift():
+    keys = dictate.resolve_modifier_keys("shift")
+    # Left shift must be recognised regardless of which variant the OS reports.
+    assert keyboard.Key.shift in keys or keyboard.Key.shift_l in keys
+
+
+def test_resolve_modifier_keys_unknown_defaults_shift():
+    assert dictate.resolve_modifier_keys("bogus") == dictate.resolve_modifier_keys("shift")
+
+
+def test_resolve_modifier_keys_excludes_hotkey():
+    # A ctrl-family hotkey must not appear in a ctrl modifier set (would self-trigger).
+    keys = dictate.resolve_modifier_keys("ctrl", exclude=keyboard.Key.ctrl_r)
+    assert keyboard.Key.ctrl_r not in keys
+
+
+def test_should_latch():
+    mods = {keyboard.Key.shift, keyboard.Key.shift_l}
+    # Enabled + a modifier held -> latch.
+    assert dictate.should_latch(True, mods, {keyboard.Key.shift_l, keyboard.Key.alt_r})
+    # Enabled but no modifier held -> no latch (normal press-and-hold).
+    assert not dictate.should_latch(True, mods, {keyboard.Key.alt_r})
+    # Disabled -> never latch even with modifier held.
+    assert not dictate.should_latch(False, mods, {keyboard.Key.shift_l})
