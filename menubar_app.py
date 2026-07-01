@@ -192,6 +192,7 @@ if rumps is not None:
             # Pasting behaviour toggles.
             self._options_menu = rumps.MenuItem("Pasting")
             for key, label, env in (
+                ("single_line", "Join into one line (no line breaks)", "SINGLE_LINE"),
                 ("preserve_clipboard", "Preserve clipboard", "PRESERVE_CLIPBOARD"),
                 ("auto_press_enter", "Auto-press Enter after paste", "AUTO_PRESS_ENTER"),
             ):
