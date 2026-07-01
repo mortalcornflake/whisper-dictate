@@ -125,14 +125,54 @@ def get_hotkey_name(key):
     return name_map.get(key, str(key))
 
 
+# Modifier families for the hands-free latch gesture. Each name maps to every
+# pynput Key that counts (generic + left/right), so "shift" matches whichever
+# variant the OS reports.
+_MODIFIER_FAMILIES = {
+    "shift": ("shift", "shift_l", "shift_r"),
+    "ctrl": ("ctrl", "ctrl_l", "ctrl_r"),
+    "cmd": ("cmd", "cmd_l", "cmd_r"),
+    "alt": ("alt", "alt_l", "alt_r"),
+}
+
+
+def resolve_modifier_keys(name, exclude=None):
+    """Return the set of pynput Key objects for a modifier family name
+    ('shift'/'ctrl'/'cmd'/'alt'; unknown -> shift), minus ``exclude`` (used to
+    drop the hotkey itself so a hotkey in the same family can't self-trigger)."""
+    attrs = _MODIFIER_FAMILIES.get((name or "shift").lower(), _MODIFIER_FAMILIES["shift"])
+    keys = {getattr(keyboard.Key, a) for a in attrs if hasattr(keyboard.Key, a)}
+    keys.discard(exclude)
+    return keys
+
+
+def should_latch(hands_free_enabled, modifier_keys, pressed_keys):
+    """True when a hotkey press should start a *latched* (hands-free) recording:
+    hands-free is on and one of the modifier keys is currently held."""
+    return bool(hands_free_enabled and (modifier_keys & pressed_keys))
+
+
 # === Configuration ===
 # Default hotkey is platform-aware: Right Option on macOS, Right Ctrl on Windows
 # (Right Alt there is AltGr on many layouts and misbehaves). Override with HOTKEY.
 _DEFAULT_HOTKEY = "ctrl_r" if sys.platform == "win32" else "alt_r"
 HOTKEY_KEY = parse_hotkey(os.environ.get("HOTKEY", _DEFAULT_HOTKEY))
 RESET_COMBO = {keyboard.Key.ctrl, keyboard.Key.shift}  # Ctrl+Shift for reset combo
-PRESERVE_CLIPBOARD = os.environ.get("PRESERVE_CLIPBOARD", "true").lower() in ("true", "1", "yes")
-AUTO_PRESS_ENTER = os.environ.get("AUTO_PRESS_ENTER", "false").lower() in ("true", "1", "yes")
+# Settings the menu bar can flip while the app runs. The core reads these at
+# use-time (never captured once), and the menu bar mutates this dict in place and
+# writes the choice back to .env — same pattern as SOUNDS_ENABLED below.
+#   hands_free        - Shift+hotkey starts a latched recording you stop with the
+#                       hotkey alone (no need to keep holding). See on_press.
+#   preserve_clipboard- save/restore the clipboard around each paste.
+#   auto_press_enter  - press Return after pasting (send chats/commands).
+LIVE_SETTINGS = {
+    "hands_free": _env_bool("HANDS_FREE", True),
+    "preserve_clipboard": _env_bool("PRESERVE_CLIPBOARD", True),
+    "auto_press_enter": _env_bool("AUTO_PRESS_ENTER", False),
+}
+# Modifier you hold together with the hotkey to start a hands-free (latched)
+# recording: shift (default), ctrl, cmd, or alt. Matches either left/right variant.
+HANDS_FREE_MODIFIER = os.environ.get("HANDS_FREE_MODIFIER", "shift")
 PLAY_SOUNDS = _env_bool("PLAY_SOUNDS", True)  # master switch (back-compat); per-event below
 # Per-event sound toggles. Each defaults to the PLAY_SOUNDS master switch, so
 # PLAY_SOUNDS=false still mutes everything, while SOUND_START / SOUND_STOP /
@@ -665,7 +705,7 @@ def paste_text(text: str):
     old_clipboard = None
 
     # Save current clipboard if preservation is enabled
-    if PRESERVE_CLIPBOARD:
+    if LIVE_SETTINGS["preserve_clipboard"]:
         old_clipboard = get_clipboard()
         log(f"📋 Saved clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
 
@@ -676,7 +716,7 @@ def paste_text(text: str):
     send_paste()
     log(f"✅ Pasted: {text[:50]}{'...' if len(text) > 50 else ''}")
 
-    if PRESERVE_CLIPBOARD and old_clipboard is not None:
+    if LIVE_SETTINGS["preserve_clipboard"] and old_clipboard is not None:
         # Wait for paste to complete before restoring clipboard
         time.sleep(0.5)
 
@@ -685,7 +725,7 @@ def paste_text(text: str):
         log(f"♻️  Restored clipboard: {old_clipboard[:50]}{'...' if len(old_clipboard) > 50 else ''}")
 
     # Automatically press Enter/Return if enabled
-    if AUTO_PRESS_ENTER:
+    if LIVE_SETTINGS["auto_press_enter"]:
         time.sleep(0.1)  # Brief pause to ensure paste completes
         send_enter()
         log("⏎  Pressed Enter")
@@ -700,6 +740,11 @@ class DictationListener:
         self.is_recording = False
         self.last_transcription = ""  # most recent pasted text (for menu bar UI)
         self.pressed_keys = set()
+        self._latched = False  # hands-free recording: don't stop on hotkey release
+        # Keys that, held with the hotkey, start a hands-free recording. Exclude
+        # the hotkey so a same-family hotkey can't trigger it on its own.
+        self._hands_free_keys = resolve_modifier_keys(
+            HANDS_FREE_MODIFIER, exclude=HOTKEY_KEY)
         self._standby_recorder = None
         self._standby_lock = threading.Lock()
         self._last_hotkey_time = 0  # Debounce key-repeat
@@ -761,6 +806,12 @@ class DictationListener:
             self._last_hotkey_time = now
 
             if not self.is_recording:
+                # Hands-free: if the modifier is held at press time, latch the
+                # recording so releasing the hotkey does NOT stop it — the user
+                # taps the hotkey again (alone) to stop. pressed_keys already
+                # includes the hotkey here; _hands_free_keys excludes it.
+                self._latched = should_latch(
+                    LIVE_SETTINGS["hands_free"], self._hands_free_keys, self.pressed_keys)
                 # Use pre-spawned standby recorder, or create fresh if none available
                 if self._standby_recorder:
                     self.recorder = self._standby_recorder
@@ -771,20 +822,26 @@ class DictationListener:
                 self.is_recording = True
                 self._warning_played = False
                 self.recorder.start()
+                if self._latched:
+                    log("🔒 Hands-free recording — tap the hotkey again to stop")
             else:
-                # Stop recording (works around lost key release events)
+                # Stop recording (works around lost key release events, and is how
+                # a latched hands-free recording is ended).
                 log("⚙️  Hotkey pressed again - stopping recording")
                 self._stop_and_process_recording()
 
     def on_release(self, key):
         self.pressed_keys.discard(key)
 
-        if self.is_recording and key == HOTKEY_KEY:
+        # In hands-free (latched) mode, releasing the hotkey is ignored — the user
+        # stops with a second tap. Otherwise this is normal press-and-hold.
+        if self.is_recording and key == HOTKEY_KEY and not self._latched:
             self._stop_and_process_recording()
 
     def _stop_and_process_recording(self):
         """Stop current recording and transcribe in background."""
         self.is_recording = False
+        self._latched = False
 
         # Dispose of recorder and process in background
         old_recorder = self.recorder
@@ -815,6 +872,7 @@ class DictationListener:
         log(f"⚙️  Reset triggered: {reason}")
 
         self.is_recording = False
+        self._latched = False
 
         # Dispose of the old recorder and standby
         old_recorder = self.recorder
@@ -1066,6 +1124,9 @@ def main():
                     log_path=os.path.expanduser("~/whisper-dictate.log"),
                     on_quit=menubar_quit,
                     sound_config=SOUNDS_ENABLED,
+                    live_settings=LIVE_SETTINGS,
+                    backend=BACKEND,
+                    hands_free_modifier=HANDS_FREE_MODIFIER,
                 )
             except KeyboardInterrupt:
                 pass

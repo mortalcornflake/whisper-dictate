@@ -16,8 +16,10 @@ is only defined when ``rumps`` is importable. ``dictate.py`` imports
 win32). The pure helpers below avoid importing ``rumps`` so they stay unit-testable
 on any platform.
 """
+import json
 import os
 import subprocess
+import tempfile
 import time
 
 IDLE_GLYPH = "🎙"
@@ -61,6 +63,19 @@ def _open_in_editor(path):
         subprocess.Popen(
             ["open", "-t", path],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
+
+
+def _notify(title, message):
+    """Show a macOS notification (reliable from a menu-bar accessory app, unlike a
+    modal alert). json.dumps gives safe AppleScript string literals."""
+    try:
+        subprocess.run(
+            ["osascript", "-e",
+             f"display notification {json.dumps(message)} with title {json.dumps(title)}"],
+            capture_output=True,
         )
     except OSError:
         pass
@@ -121,16 +136,21 @@ if rumps is not None:
         """rumps app that polls the listener and reflects its state in the bar."""
 
         def __init__(self, listener, hotkey_name, repo_dir, log_path, on_quit,
-                     sound_config=None):
+                     sound_config=None, live_settings=None, backend=None,
+                     hands_free_modifier="shift"):
             super().__init__("Whisper Dictate", title=IDLE_GLYPH, quit_button=None)
             self._listener = listener
             self._hotkey_name = hotkey_name or "the hotkey"
+            self._hands_free_mod = (hands_free_modifier or "shift").capitalize()
             self._repo_dir = repo_dir
             self._log_path = log_path
             self._on_quit_cb = on_quit
-            # Same dict object as dictate.SOUNDS_ENABLED — mutating it here changes
-            # what the core plays, with no UI->core coupling beyond this handle.
+            # These dicts are the SAME objects as dictate.SOUNDS_ENABLED /
+            # LIVE_SETTINGS — mutating them here changes core behaviour live, with
+            # no UI->core coupling beyond these handles. Values also persist to .env.
             self._sound_config = sound_config if sound_config is not None else {}
+            self._live_settings = live_settings if live_settings is not None else {}
+            self._backend = backend  # informational; changing it needs a restart
             self._env_path = os.path.join(repo_dir, ".env")
             self._rec_started = None
             self._was_recording = False
@@ -153,10 +173,49 @@ if rumps is not None:
             for event, label in _SOUND_LABELS:
                 if event not in self._sound_config:
                     continue
-                item = rumps.MenuItem(label, callback=self._make_sound_toggle(event))
+                item = rumps.MenuItem(
+                    label, callback=self._make_toggle(
+                        self._sound_config, event, f"SOUND_{event.upper()}"))
                 item.state = 1 if self._sound_config[event] else 0
                 self._sounds_menu.add(item)
                 self._sound_items[event] = item
+
+            # Hands-free latch toggle — top-level checkmark so it's easy to find.
+            self._handsfree_item = None
+            if "hands_free" in self._live_settings:
+                self._handsfree_item = rumps.MenuItem(
+                    "Hands-free mode (Shift + hotkey)",
+                    callback=self._make_toggle(
+                        self._live_settings, "hands_free", "HANDS_FREE"))
+                self._handsfree_item.state = 1 if self._live_settings["hands_free"] else 0
+
+            # Pasting behaviour toggles.
+            self._options_menu = rumps.MenuItem("Pasting")
+            for key, label, env in (
+                ("preserve_clipboard", "Preserve clipboard", "PRESERVE_CLIPBOARD"),
+                ("auto_press_enter", "Auto-press Enter after paste", "AUTO_PRESS_ENTER"),
+            ):
+                if key not in self._live_settings:
+                    continue
+                item = rumps.MenuItem(
+                    label, callback=self._make_toggle(self._live_settings, key, env))
+                item.state = 1 if self._live_settings[key] else 0
+                self._options_menu.add(item)
+
+            # Transcription backend — radio-style; changing it writes .env and
+            # needs a restart (the core reads it once at startup).
+            self._backend_menu = rumps.MenuItem("Transcription backend")
+            self._backend_items = {}
+            for value, label in (
+                ("local", "Local (whisper.cpp)"),
+                ("groq", "Groq (cloud)"),
+                ("openai", "OpenAI (cloud)"),
+                ("faster-whisper", "faster-whisper (GPU)"),
+            ):
+                item = rumps.MenuItem(label, callback=self._make_backend_setter(value))
+                item.state = 1 if value == self._backend else 0
+                self._backend_menu.add(item)
+                self._backend_items[value] = item
 
             self.menu = [
                 self._status,
@@ -166,9 +225,14 @@ if rumps is not None:
                 None,
                 self._pause_item,
                 rumps.MenuItem("Reset recorder", callback=self._on_reset),
-                self._sounds_menu,
                 None,
-                rumps.MenuItem("Open settings (.env)…", callback=self._on_settings),
+            ] + ([self._handsfree_item] if self._handsfree_item else []) + [
+                self._sounds_menu,
+                self._options_menu,
+                self._backend_menu,
+                None,
+                rumps.MenuItem("Help & about…", callback=self._on_help),
+                rumps.MenuItem("Edit config file (.env)…", callback=self._on_settings),
                 rumps.MenuItem("Open log…", callback=self._on_log),
                 None,
                 rumps.MenuItem("Quit Whisper Dictate", callback=self._on_quit),
@@ -228,18 +292,75 @@ if rumps is not None:
         def _on_reset(self, _item):
             self._listener.reset(reason="Menu bar reset")
 
-        def _make_sound_toggle(self, event):
-            """Build the callback for one sound's menu item. Flips the shared
-            config (so the core plays/mutes it immediately), updates the checkmark,
-            and persists the choice to .env so it sticks across restarts."""
+        def _make_toggle(self, store, key, env_name):
+            """Build a checkmark toggle callback for a boolean setting. Flips the
+            shared dict (so the core sees it immediately), updates the checkmark,
+            and persists ``env_name`` to .env so it sticks across restarts."""
             def _toggle(item):
-                enabled = not self._sound_config.get(event, False)
-                self._sound_config[event] = enabled
+                enabled = not store.get(key, False)
+                store[key] = enabled
                 item.state = 1 if enabled else 0
                 persist_env_setting(
-                    self._env_path, f"SOUND_{event.upper()}",
-                    "true" if enabled else "false")
+                    self._env_path, env_name, "true" if enabled else "false")
             return _toggle
+
+        def _make_backend_setter(self, value):
+            """Build the callback for a backend radio item: mark it as the selected
+            one, persist DICTATE_BACKEND, and tell the user a restart is needed
+            (the core reads the backend only at startup)."""
+            def _select(item):
+                for v, it in self._backend_items.items():
+                    it.state = 1 if v == value else 0
+                self._backend = value
+                persist_env_setting(self._env_path, "DICTATE_BACKEND", value)
+                _notify("Backend set to " + value,
+                        "Restart Whisper Dictate to apply (Quit + relaunch).")
+            return _select
+
+        def _help_text(self):
+            """Assemble the quick-guide shown by Help & about, using the live
+            hotkey/modifier names so it always matches the current config."""
+            k = self._hotkey_name
+            m = self._hands_free_mod
+            return "\n".join((
+                "Speak and it types for you — the transcription is pasted at your cursor.",
+                "",
+                f"DICTATE  ·  Hold {k} and talk. Release to transcribe and paste.",
+                "",
+                f"HANDS-FREE  ·  Hold {m} and tap {k} to start, then let go and keep",
+                f"talking. Tap {k} again to stop. (Toggle with the Hands-free checkbox.)",
+                "",
+                f"IF IT GETS STUCK  ·  Tap {k} again, click Reset recorder, or press",
+                "Ctrl+Shift+R. Recordings auto-stop after 5 min (warning sound 10s before).",
+                "",
+                "SOUNDS & PASTING  ·  Use the Sounds and Pasting submenus to turn cues,",
+                "clipboard-preserve, and auto-Enter on/off. Changes save instantly.",
+                "",
+                "BACKEND  ·  Transcription backend submenu switches Local/Groq/OpenAI/"
+                "faster-whisper (needs a restart).",
+                "",
+                "SETTINGS  ·  “Edit config file (.env)” has every option, explained.",
+                "“Open log” shows recent activity.",
+                "",
+                f"Menu bar icon:  {IDLE_GLYPH} idle · {REC_GLYPH} recording · {PAUSED_GLYPH} paused.",
+                "",
+                "Whisper Dictate — free, local-first dictation.",
+                "github.com/mortalcornflake/whisper-dictate",
+            ))
+
+        def _on_help(self, _item):
+            # Open the guide in a text editor rather than a modal alert: NSAlert is
+            # unreliable from a menu-bar accessory app (can appear behind other
+            # windows or not at all), while `open -t` always shows — same path we
+            # use for the log and .env.
+            path = os.path.join(tempfile.gettempdir(), "whisper-dictate-help.txt")
+            try:
+                with open(path, "w") as f:
+                    f.write("Whisper Dictate — Help\n" + "=" * 40 + "\n\n"
+                            + self._help_text() + "\n")
+            except OSError:
+                return
+            _open_in_editor(path)
 
         def _on_settings(self, _item):
             _open_in_editor(ensure_env_file(self._repo_dir))
@@ -269,17 +390,20 @@ if rumps is not None:
 
 
 def run_with_menubar(listener, hotkey_name=None, log_path=None, on_quit=None,
-                     sound_config=None):
+                     sound_config=None, live_settings=None, backend=None,
+                     hands_free_modifier="shift"):
     """Run the keyboard listener (background thread) plus the menu bar app (this
     thread). Blocks until the user chooses Quit. ``on_quit`` is invoked from the
     Quit handler for teardown (stop listener, kill subprocesses) because Cocoa's
-    terminate exits the process without returning here. ``sound_config`` is the
-    core's live per-event sound dict (dictate.SOUNDS_ENABLED), shown as a toggle
-    submenu. Raises RuntimeError if rumps isn't available."""
+    terminate exits the process without returning here. ``sound_config`` and
+    ``live_settings`` are the core's live dicts (dictate.SOUNDS_ENABLED /
+    LIVE_SETTINGS), shown as toggle menus; ``backend`` seeds the backend radio.
+    Raises RuntimeError if rumps isn't available."""
     if rumps is None:
         raise RuntimeError("rumps is not installed — macOS menu bar unavailable")
     repo_dir = os.path.dirname(os.path.abspath(__file__))
     listener.start_listening()
     app = _WhisperDictateMenuBar(listener, hotkey_name, repo_dir, log_path, on_quit,
-                                 sound_config=sound_config)
+                                 sound_config=sound_config, live_settings=live_settings,
+                                 backend=backend, hands_free_modifier=hands_free_modifier)
     app.run()
