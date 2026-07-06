@@ -6,6 +6,7 @@ Hold the hotkey, speak, release to transcribe and paste.
 
 import io
 import os
+import re
 import sys
 import json
 import time
@@ -75,6 +76,19 @@ def _env_bool(name, default):
     if raw is None or raw.strip() == "":
         return default
     return raw.strip().lower() in ("true", "1", "yes")
+
+
+def _env_float(name, default):
+    """Parse a float env var, falling back to default on a missing/bad value.
+    Used by the VAD gate tuning knobs (VAD_MIN_SPEECH_SECS)."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log(f"⚠️  Invalid {name}={raw!r} in .env; using default {default}")
+        return default
 
 
 def parse_hotkey(key_str):
@@ -199,6 +213,18 @@ AUTO_STOP_TIMEOUT = _env_int("AUTO_STOP_TIMEOUT", 300)  # Seconds before auto-st
 AUTO_STOP_WARNING = 10  # Seconds before auto-stop to play warning sound
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
+# Voice-activity gate: a recording must contain at least VAD_MIN_SPEECH_SECS of
+# sustained speech before it's sent to the backend. Stops Whisper hallucinating
+# phantom phrases ("thank you", "yeah", ...) on silence, breaths, and mic bumps.
+# Set VAD_GATE=false to bypass entirely (debugging / over-aggressive on your mic).
+VAD_GATE = _env_bool("VAD_GATE", True)
+VAD_MIN_SPEECH_SECS = _env_float("VAD_MIN_SPEECH_SECS", 0.2)
+# Absolute per-frame RMS floor (int16 scale) below which a frame is "not speech".
+# Absolute — NOT relative to this recording's median — so a continuously-spoken
+# dictation (whose median RMS is speech-level) is still accepted. Tunable: lower
+# it if the gate drops quiet real speech; raise it if background noise leaks
+# through.
+VAD_MIN_ENERGY = _env_float("VAD_MIN_ENERGY", 150.0)
 
 # Audio input device - set to None for system default, or device name/index
 # Examples: "MacBook Pro Microphone", "iMac Microphone", "USB Microphone"
@@ -351,6 +377,59 @@ def trim_trailing_silence(audio_data, sample_rate=16000, threshold=300, buffer_s
     return audio_data[:end]
 
 
+def has_speech(audio_data, sample_rate=16000, frame_secs=0.03,
+               min_speech_secs=VAD_MIN_SPEECH_SECS, min_run_secs=0.12,
+               energy_floor=None):
+    """Energy-based voice-activity gate. Returns True if the recording contains
+    enough sustained speech energy to be worth transcribing.
+
+    Splits the audio into ``frame_secs`` non-overlapping frames and computes
+    per-frame RMS. A frame counts as speech if its RMS exceeds ``energy_floor``
+    — an ABSOLUTE, mic-level threshold (int16 scale), deliberately NOT relative
+    to this recording's own levels. A relative/median threshold backfires on a
+    continuously-spoken dictation: when the recording is mostly speech the
+    median RMS is speech-level, so a median-relative cutoff sits above the
+    speech itself and every frame gets rejected.
+
+    We then require BOTH ``min_speech_secs`` of speech in total AND a contiguous
+    run of at least ``min_run_secs``. The run requirement is what rejects
+    isolated transients (desk taps, mic bumps) that are loud but brief — the
+    classic trigger for "Thank you." / "you" / "[BLANK_AUDIO]" phantoms.
+
+    ``audio_data`` is int16 PCM (what np.load of the recorder's temp file
+    yields); it's promoted to float64 here to avoid overflow in the squared sum.
+    """
+    if energy_floor is None:
+        energy_floor = VAD_MIN_ENERGY
+    if audio_data is None:
+        return False
+    audio = np.asarray(audio_data).flatten().astype(np.float64)
+    n = len(audio)
+    if n == 0:
+        return False
+    frame = max(1, int(frame_secs * sample_rate))
+    if n < frame:
+        return False
+    trunc = n - (n % frame)
+    frames = audio[:trunc].reshape(-1, frame)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    if rms.size == 0:
+        return False
+    # Absolute floor: frames with at least this much sustained energy count as
+    # speech. Mic-level, so it cleanly separates speech (RMS in the hundreds to
+    # thousands) from silence/background (RMS in the tens or below).
+    speech = rms > energy_floor
+    speech_secs = float(speech.sum()) * frame_secs
+    # Longest contiguous run of speech frames.
+    longest = run = 0
+    for s in speech:
+        run = run + 1 if s else 0
+        if run > longest:
+            longest = run
+    longest_secs = longest * frame_secs
+    return speech_secs >= min_speech_secs and longest_secs >= min_run_secs
+
+
 class Recorder:
     """Subprocess-based recorder that can be forcefully killed.
     Spawns subprocess eagerly so imports are pre-loaded before recording starts."""
@@ -426,6 +505,15 @@ class Recorder:
             if os.path.exists(self.temp_file.name):
                 audio_data = np.load(self.temp_file.name)
                 audio_data = trim_trailing_silence(audio_data, sample_rate=SAMPLE_RATE)
+
+                # Voice-activity gate: reject near-silence / noise / transients
+                # BEFORE they reach Whisper (which would hallucinate a phantom
+                # phrase off them). Empty the buffer so the WAV-conversion branch
+                # below is skipped and the caller sees an empty recording.
+                if len(audio_data) > 0 and VAD_GATE and not has_speech(
+                        audio_data, sample_rate=SAMPLE_RATE):
+                    log("🤫 No speech detected — skipping transcription")
+                    audio_data = audio_data[:0]
 
                 if len(audio_data) > 0:
                     # Convert to WAV bytes
@@ -635,16 +723,48 @@ def transcribe_local(audio_bytes: bytes) -> str:
         os.unlink(temp_path)
 
 
+# Whisper's classic phantom phrases — short outputs it invents when fed
+# silence, breaths, or transient noise instead of real speech. Matched as the
+# WHOLE transcript (case-insensitive, after cleaning + trailing-punct strip), so
+# a real dictation that merely contains one of these words is left untouched.
 HALLUCINATION_PHRASES = {
-    "thank you", "thank you.", "thanks for watching", "thanks for watching.",
-    "okay", "okay.", "you", "you.", "yeah", "yeah.", "yes", "yes.",
+    "thank you", "thanks for watching", "please subscribe", "by the clock",
+    "you", "so", "the", "a", "and", "is", "be certain", "good job",
+    "what", "sorry", "alright",
+    "okay", "yeah", "yes",
+    "hmm", "mm", "mmm", "uh", "mm-hmm", "mmm-hmm",
 }
+
+# Whisper special tokens / event tags that sometimes decode as literal text
+# (e.g. "[BLANK_AUDIO]"). Stripped rather than dropped, so a real transcript
+# with a stray tag is cleaned up. Conservative — only known event tokens, never
+# arbitrary bracketed text like "[Figure 1]".
+_WHISPER_SPECIAL_TOKENS = re.compile(
+    r"\[\s*(?:bl?ank[\s_-]*audio|music|applause|sound[\s_-]*effect|laughter|"
+    r"crosstalk|silence|footsteps)\s*\]"
+    r"|\(\s*(?:music|applause|laughter|silence)\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _clean_transcript(text: str) -> str:
+    """Strip leaked Whisper special tokens / event tags and tidy whitespace.
+    Empty/whitespace-only input -> ''. Conservative: arbitrary bracketed text
+    survives."""
+    if not text:
+        return ""
+    cleaned = _WHISPER_SPECIAL_TOKENS.sub(" ", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _is_hallucination(text: str) -> bool:
-    """True if text is a known Whisper phantom phrase (triggered by trailing
-    silence). Matched case-insensitively after stripping."""
-    return text.strip().lower() in HALLUCINATION_PHRASES
+    """True if text is empty after cleaning, or is a known Whisper phantom
+    phrase (triggered by silence/noise). Matched case-insensitively after
+    cleaning and stripping trailing punctuation."""
+    cleaned = _clean_transcript(text)
+    if not cleaned:
+        return True
+    return cleaned.lower().rstrip(".,!?;:'\"-") in HALLUCINATION_PHRASES
 
 
 def collapse_whitespace(text: str) -> str:
@@ -652,6 +772,42 @@ def collapse_whitespace(text: str) -> str:
     speech segments) into single spaces, so a long dictation pastes as one block
     instead of many lines. Empty/whitespace-only -> ''."""
     return " ".join(text.split())
+
+
+# 4+ identical consecutive words (case-insensitive, optional commas/periods
+# between them), e.g. "yeah yeah yeah yeah" or "the, the, the, the". A classic
+# Whisper stuck-token loop on silence/noise; collapsed to a single occurrence.
+_CONSECUTIVE_REPEAT_RE = re.compile(r"\b(\w+)(?:[,\s.]+\1){3,}\b", re.IGNORECASE)
+
+
+def _collapse_consecutive_repeats(text: str) -> str:
+    """Collapse runs of 4+ identical consecutive words to one occurrence.
+    Multi-pass (collapsing can reveal another run). Real speech essentially
+    never has 4+ identical words in a row, so this is safe."""
+    if not text:
+        return text
+    cur = text
+    for _ in range(3):
+        new = _CONSECUTIVE_REPEAT_RE.sub(r"\1", cur)
+        if new == cur:
+            break
+        cur = new
+    return cur
+
+
+def _is_repetitive_loop(text: str, max_unique: int = 3, min_words: int = 8) -> bool:
+    """True for a hallucinated loop: a long-ish transcript built from very few
+    unique words (e.g. 'thank you thank you thank you', 'the the the the the').
+    Catches multi-word repeating units that _collapse_consecutive_repeats can't
+    see (it only handles single-word runs)."""
+    if not text:
+        return False
+    words = [w for w in text.lower().split() if w]
+    if len(words) < min_words:
+        return False
+    unique = {w.rstrip(".,!?;:'\"-") for w in words}
+    unique.discard("")
+    return len(unique) <= max_unique
 
 
 def _recording_basename(now):
@@ -734,9 +890,16 @@ def transcribe(audio_bytes: bytes) -> str:
             notify("Whisper Dictate", f"Transcription failed: {e}")
             return ""
 
-    # Filter known Whisper hallucination phrases (triggered by trailing silence)
+    # Post-process: strip leaked special tokens, collapse stuck-token runs, then
+    # drop known phantom phrases and hallucinated loops. All target Whisper's
+    # silence/noise failure modes; real dictations pass through untouched.
+    result = _clean_transcript(result)
+    result = _collapse_consecutive_repeats(result)
     if _is_hallucination(result):
         log(f"Filtered hallucination: {result.strip()}")
+        return ""
+    if _is_repetitive_loop(result):
+        log(f"Filtered repetitive loop: {result.strip()}")
         return ""
 
     return result
@@ -916,6 +1079,12 @@ class DictationListener:
         threading.Thread(target=stop_and_process, daemon=True).start()
 
     def _process_audio(self, audio_bytes: bytes):
+        if not audio_bytes:
+            # Empty recording (silence/noise rejected by the VAD gate, all-silence
+            # trim, or a read error) — nothing to transcribe or archive. The gate
+            # already logged the reason upstream. Still re-arm the standby recorder.
+            self._prepare_standby()
+            return
         text = transcribe(audio_bytes).strip()
         if LIVE_SETTINGS["single_line"]:
             text = collapse_whitespace(text)

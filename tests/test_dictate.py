@@ -35,6 +35,20 @@ def test_is_hallucination():
     assert dictate._is_hallucination("YOU")
     assert not dictate._is_hallucination("hello world")
     assert not dictate._is_hallucination("thank you for the help")
+    # Expanded phantom set (silence/noise phantoms seen in the wild):
+    assert dictate._is_hallucination("hmm")
+    assert dictate._is_hallucination("Good job.")
+    assert dictate._is_hallucination("Thanks for watching.")
+    assert dictate._is_hallucination("Please subscribe.")
+    assert dictate._is_hallucination("Be certain.")
+    assert dictate._is_hallucination("you")
+    assert not dictate._is_hallucination("you too")            # extra word -> real
+    assert not dictate._is_hallucination("okay let's go")      # extra words -> real
+    # Empty / whitespace-only / pure-special-token -> treated as hallucination.
+    assert dictate._is_hallucination("")
+    assert dictate._is_hallucination("   ")
+    assert dictate._is_hallucination("[BLANK_AUDIO]")
+    assert dictate._is_hallucination("[MUSIC]")
 
 
 def test_get_clipboard_coerces_none(monkeypatch):
@@ -132,3 +146,77 @@ def test_should_latch():
     assert not dictate.should_latch(True, mods, {keyboard.Key.alt_r})
     # Disabled -> never latch even with modifier held.
     assert not dictate.should_latch(False, mods, {keyboard.Key.shift_l})
+
+
+def test_clean_transcript_strips_special_tokens():
+    assert dictate._clean_transcript("[BLANK_AUDIO]") == ""
+    assert dictate._clean_transcript("(applause)") == ""
+    assert dictate._clean_transcript("yeah [MUSIC]") == "yeah"
+    assert dictate._clean_transcript("hello [BLANK_AUDIO] world") == "hello world"
+    # Conservative: arbitrary bracketed text survives.
+    assert dictate._clean_transcript("see [Figure 1] here") == "see [Figure 1] here"
+    assert dictate._clean_transcript("") == ""
+    assert dictate._clean_transcript("   ") == ""
+
+
+def test_collapse_consecutive_repeats():
+    assert dictate._collapse_consecutive_repeats("yeah yeah yeah yeah") == "yeah"
+    assert dictate._collapse_consecutive_repeats("the, the, the, the") == "the"
+    assert dictate._collapse_consecutive_repeats("The the the the the") == "The"  # case-insensitive
+    # Below the 4+ threshold -> unchanged.
+    assert dictate._collapse_consecutive_repeats("yeah yeah yeah") == "yeah yeah yeah"
+    assert dictate._collapse_consecutive_repeats("I really really like it") == "I really really like it"
+    # Normal speech untouched.
+    assert dictate._collapse_consecutive_repeats("I went to the store") == "I went to the store"
+    assert dictate._collapse_consecutive_repeats("") == ""
+
+
+def test_is_repetitive_loop():
+    assert dictate._is_repetitive_loop("thank you thank you thank you thank you")
+    assert dictate._is_repetitive_loop("the the the the the the the the")
+    # Real speech: many unique words -> not a loop.
+    assert not dictate._is_repetitive_loop("I went to the store to buy some milk")
+    # Too short to judge -> not flagged (handled by _collapse_consecutive_repeats instead).
+    assert not dictate._is_repetitive_loop("the the the the")
+    assert not dictate._is_repetitive_loop("")
+    assert not dictate._is_repetitive_loop("yeah yeah")
+
+
+def test_has_speech_rejects_silence():
+    sr = 16000
+    assert not dictate.has_speech(np.zeros(sr, dtype=np.int16), sample_rate=sr)
+    assert not dictate.has_speech(np.array([], dtype=np.int16), sample_rate=sr)
+    assert not dictate.has_speech(None, sample_rate=sr)
+
+
+def test_has_speech_accepts_real_speech():
+    sr = 16000
+    rng = np.random.default_rng(0)
+    bg = lambda n, amp: rng.integers(-amp, amp + 1, size=n).astype(np.int16)
+    # ~0.25s quiet lead, 0.4s loud "speech" burst, quiet tail.
+    audio = np.concatenate([
+        bg(sr // 4, 20),
+        bg(int(0.4 * sr), 5000),
+        bg(sr // 4, 20),
+    ])
+    assert dictate.has_speech(audio, sample_rate=sr)
+
+
+def test_has_speech_rejects_transient():
+    sr = 16000
+    # A single brief spike (desk-tap / mic-bump) in otherwise silence: loud but
+    # not sustained -> rejected by both the duration and contiguous-run checks.
+    audio = np.zeros(int(0.5 * sr), dtype=np.int16)
+    audio[5000:5060] = 3000  # 60 samples (~1 frame) of energy
+    assert not dictate.has_speech(audio, sample_rate=sr)
+
+
+def test_has_speech_accepts_continuous_speech():
+    # Regression: a continuously-spoken dictation has no quiet gaps, so its
+    # median frame RMS is speech-level. A median-relative threshold rejected
+    # this as "no speech" (the 9-10s false-reject bug). An absolute floor
+    # accepts it.
+    sr = 16000
+    rng = np.random.default_rng(1)
+    audio = rng.integers(-3000, 3001, size=int(1.5 * sr)).astype(np.int16)
+    assert dictate.has_speech(audio, sample_rate=sr)
