@@ -728,7 +728,7 @@ def transcribe_local(audio_bytes: bytes) -> str:
 # WHOLE transcript (case-insensitive, after cleaning + trailing-punct strip), so
 # a real dictation that merely contains one of these words is left untouched.
 HALLUCINATION_PHRASES = {
-    "thank you", "thanks for watching", "please subscribe", "by the clock",
+    "thank you", "thanks", "thanks for watching", "please subscribe", "by the clock",
     "you", "so", "the", "a", "and", "is", "be certain", "good job",
     "what", "sorry", "alright",
     "okay", "yeah", "yes",
@@ -808,6 +808,46 @@ def _is_repetitive_loop(text: str, max_unique: int = 3, min_words: int = 8) -> b
     unique = {w.rstrip(".,!?;:'\"-") for w in words}
     unique.discard("")
     return len(unique) <= max_unique
+
+
+# Whisper's trailing-silence phantoms — phrases it appends AFTER real speech
+# ends, hallucinated over the trailing silence. Stripped from the end of a
+# transcript. Two tiers:
+#   * ALWAYS — phrases that are essentially never a deliberate ending
+#     ("thanks for watching", "please subscribe", ...): stripped whenever they
+#     trail, no other signal needed.
+#   * AFTER_TERMINATOR — real words ("thank you", "thanks") that ARE sometimes
+#     legitimate endings: stripped only when they follow a sentence terminator
+#     (. ! ?), so an integrated "I want to say thank you" survives but an
+#     appended "...with GLM? Thank you." is cleaned.
+_TRAILING_PHANTOM_ALWAYS_RE = re.compile(
+    r"\s*(?:,\s*)?"
+    r"(?:thanks? for watching|thank you for watching|please(?: like and)? subscribe|"
+    r"like and subscribe|and subscribe|by the clock|subscribe)"
+    r"[\.,!?;:\s]*$",
+    re.IGNORECASE,
+)
+_TRAILING_PHANTOM_AFTER_TERM_RE = re.compile(
+    r"(?<=[.!?])\s+(?:thank you(?: very much)?|thanks)[\.,!?;:\s]*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_trailing_phantom(text: str) -> str:
+    """Remove a hallucinated trailing phantom phrase (Whisper emits these over
+    the silence after speech ends). Multi-pass, since several can pile up.
+    Conservative with ambiguous words ('thank you'/'thanks'): those are only
+    removed when they follow a sentence terminator."""
+    if not text:
+        return text
+    cur = text
+    for _ in range(4):
+        new = _TRAILING_PHANTOM_ALWAYS_RE.sub("", cur).rstrip()
+        new = _TRAILING_PHANTOM_AFTER_TERM_RE.sub("", new).rstrip()
+        if new == cur:
+            break
+        cur = new
+    return cur
 
 
 def _recording_basename(now):
@@ -895,6 +935,7 @@ def transcribe(audio_bytes: bytes) -> str:
     # silence/noise failure modes; real dictations pass through untouched.
     result = _clean_transcript(result)
     result = _collapse_consecutive_repeats(result)
+    result = _strip_trailing_phantom(result)
     if _is_hallucination(result):
         log(f"Filtered hallucination: {result.strip()}")
         return ""

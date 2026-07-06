@@ -182,6 +182,26 @@ def test_is_repetitive_loop():
     assert not dictate._is_repetitive_loop("yeah yeah")
 
 
+def test_strip_trailing_phantom():
+    # The reported case: real question + hallucinated "Thank you." in trailing silence.
+    assert dictate._strip_trailing_phantom(
+        "quickly spin up Claude code with GLM? Thank you."
+    ) == "quickly spin up Claude code with GLM?"
+    # Never-real phantoms stripped whenever they trail.
+    assert dictate._strip_trailing_phantom("Hello world thanks for watching.") == "Hello world"
+    assert dictate._strip_trailing_phantom("Please subscribe.") == ""
+    # "thank you" integrated into a sentence is preserved (no preceding terminator).
+    assert dictate._strip_trailing_phantom("I want to say thank you") == "I want to say thank you"
+    assert dictate._strip_trailing_phantom("I want to say thank you.") == "I want to say thank you."
+    # "subscribe" mid-sentence is not stripped (only matches at the tail).
+    assert dictate._strip_trailing_phantom("Please subscribe to my channel.") == "Please subscribe to my channel."
+    # No phantom -> unchanged.
+    assert dictate._strip_trailing_phantom("Hello.") == "Hello."
+    assert dictate._strip_trailing_phantom("") == ""
+    # Multiple trailing phantoms in sequence.
+    assert dictate._strip_trailing_phantom("Thanks for watching. Thank you.") == ""
+
+
 def test_has_speech_rejects_silence():
     sr = 16000
     assert not dictate.has_speech(np.zeros(sr, dtype=np.int16), sample_rate=sr)
