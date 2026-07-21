@@ -33,7 +33,9 @@ def test_truncate_short_text_unchanged():
     assert m.truncate("short", limit=20) == "short"
 
 
-def test_ensure_env_file_creates_from_example(tmp_path):
+def test_ensure_env_file_creates_from_example(tmp_path, monkeypatch):
+    monkeypatch.setattr(m.app_paths, "env_file_path",
+                        lambda: os.path.join(str(tmp_path), ".env"))
     (tmp_path / ".env.example").write_text("KEY=value\n")
     env_path = m.ensure_env_file(str(tmp_path))
     assert env_path == os.path.join(str(tmp_path), ".env")
@@ -41,14 +43,18 @@ def test_ensure_env_file_creates_from_example(tmp_path):
     assert (tmp_path / ".env").read_text() == "KEY=value\n"
 
 
-def test_ensure_env_file_keeps_existing(tmp_path):
+def test_ensure_env_file_keeps_existing(tmp_path, monkeypatch):
+    monkeypatch.setattr(m.app_paths, "env_file_path",
+                        lambda: os.path.join(str(tmp_path), ".env"))
     (tmp_path / ".env.example").write_text("KEY=fromexample\n")
     (tmp_path / ".env").write_text("KEY=existing\n")
     m.ensure_env_file(str(tmp_path))
     assert (tmp_path / ".env").read_text() == "KEY=existing\n"  # not overwritten
 
 
-def test_ensure_env_file_no_example(tmp_path):
+def test_ensure_env_file_no_example(tmp_path, monkeypatch):
+    monkeypatch.setattr(m.app_paths, "env_file_path",
+                        lambda: os.path.join(str(tmp_path), ".env"))
     # No .env.example: returns the path without creating anything.
     env_path = m.ensure_env_file(str(tmp_path))
     assert env_path == os.path.join(str(tmp_path), ".env")
