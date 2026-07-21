@@ -10,9 +10,17 @@ __pycache__/
 *.pyc
 *.pyo
 
+# PyInstaller build artifacts (the .spec is tracked as build source of truth)
+build/
+dist/
+
+# Eval harness run output (the harness itself, tools/eval_whisper.py, is tracked)
+tools/eval_report.json
+
 # Logs
 *.log
 dictate.log
+flagged.md
 
 # macOS
 .DS_Store
