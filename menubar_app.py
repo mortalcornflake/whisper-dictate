@@ -22,6 +22,9 @@ import subprocess
 import tempfile
 import time
 
+import app_paths
+import flagged
+
 IDLE_GLYPH = "🎙"
 REC_GLYPH = "🔴"
 PAUSED_GLYPH = "⏸"
@@ -43,11 +46,15 @@ def truncate(text, limit=_MAX_PREVIEW):
 
 
 def ensure_env_file(repo_dir):
-    """Return the repo ``.env`` path, creating it from ``.env.example`` the first
-    time so "Open settings" always has something to show. Best-effort."""
-    env_path = os.path.join(repo_dir, ".env")
+    """Return the ``.env`` path, creating it from ``.env.example`` the first
+    time so "Open settings" always has something to show. Uses the frozen-aware
+    app_paths resolver (repo when running from source, per-user app-support dir
+    when frozen). Best-effort."""
+    env_path = app_paths.env_file_path()
     if not os.path.exists(env_path):
-        example = os.path.join(repo_dir, ".env.example")
+        example = (app_paths.bundled_resource(".env.example")
+                   if app_paths.is_frozen()
+                   else os.path.join(repo_dir, ".env.example"))
         if os.path.exists(example):
             try:
                 import shutil
@@ -152,7 +159,7 @@ if rumps is not None:
             self._live_settings = live_settings if live_settings is not None else {}
             self._backend = backend  # informational; changing it needs a restart
             self._recordings_dir = recordings_dir
-            self._env_path = os.path.join(repo_dir, ".env")
+            self._env_path = app_paths.env_file_path()
             self._rec_started = None
             self._was_recording = False
             self._paused = False
@@ -166,6 +173,27 @@ if rumps is not None:
             self._copy_item.set_callback(None)  # enabled once there's text
             self._pause_item = rumps.MenuItem(
                 "Pause listening", callback=self._on_pause)
+
+            # Flagged transcriptions — a submenu of recent hallucination alerts,
+            # rebuilt from flagged.md by _refresh_flagged (called from _tick).
+            # "Open log & add notes" opens the markdown for review + annotation.
+            self._flagged_menu = rumps.MenuItem("⚠️ Flagged")
+            self._flagged_mtime = None
+
+            # Garbled-text alerts — independent toggles for the notification and
+            # sound that fire when the detector trips. The flagged log is always
+            # written regardless of these.
+            self._alerts_menu = rumps.MenuItem("Garbled-text alerts")
+            for key, label, env in (
+                ("hallucination_notify", "Notification", "HALLUCINATION_NOTIFY"),
+                ("hallucination_sound", "Sound", "HALLUCINATION_SOUND"),
+            ):
+                if key not in self._live_settings:
+                    continue
+                item = rumps.MenuItem(
+                    label, callback=self._make_toggle(self._live_settings, key, env))
+                item.state = 1 if self._live_settings[key] else 0
+                self._alerts_menu.add(item)
 
             # Per-event sound toggles — a checkmark submenu that flips
             # self._sound_config (shared with the core) and persists to .env.
@@ -247,6 +275,8 @@ if rumps is not None:
                 rumps.MenuItem("Open recordings folder…", callback=self._on_open_recordings),
                 rumps.MenuItem("Edit config file (.env)…", callback=self._on_settings),
                 rumps.MenuItem("Open log…", callback=self._on_log),
+                self._flagged_menu,
+                self._alerts_menu,
                 None,
                 rumps.MenuItem("Quit Whisper Dictate", callback=self._on_quit),
             ]
@@ -281,6 +311,7 @@ if rumps is not None:
             last = getattr(self._listener, "last_transcription", "") or ""
             self._preview.title = f"Last: {truncate(last)}" if last else "Last: —"
             self._copy_item.set_callback(self._on_copy if last else None)
+            self._refresh_flagged()
 
         # ---- menu actions ----
         def _on_copy(self, _item):
@@ -400,6 +431,39 @@ if rumps is not None:
                 if candidate and os.path.exists(candidate):
                     _open_in_editor(candidate)
                     return
+
+        def _refresh_flagged(self):
+            """Rebuild the Flagged submenu from flagged.md, but only when the
+            file's mtime has changed (called every _tick = 0.5s, so the stat
+            must stay cheap). Lists recent alerts; the last item opens the log
+            for review + note-taking."""
+            try:
+                mtime = os.path.getmtime(flagged.flagged_log_path())
+            except OSError:
+                mtime = None
+            if mtime == self._flagged_mtime:
+                return
+            self._flagged_mtime = mtime
+            self._flagged_menu.clear()
+            entries = flagged.read_recent(limit=10) if mtime else []
+            self._flagged_menu.title = f"⚠️ Flagged ({len(entries)})"
+            if not entries:
+                self._flagged_menu.add(rumps.MenuItem("(none yet)", callback=None))
+            else:
+                for ts, reason in entries:
+                    when = ts[11:] if len(ts) > 11 else ts   # trim the date, keep time
+                    self._flagged_menu.add(
+                        rumps.MenuItem(f"{when}  {reason[:32]}", callback=None))
+            self._flagged_menu.add(
+                rumps.MenuItem("Open log & add notes…", callback=self._on_open_flagged))
+
+        def _on_open_flagged(self, _item):
+            path = flagged.flagged_log_path()
+            if not os.path.exists(path):
+                _notify("No flagged transcriptions yet",
+                        "Nothing has tripped the hallucination detector so far.")
+                return
+            _open_in_editor(path)
 
         def _on_quit(self, _item):
             # rumps.quit_application() calls Cocoa terminate, which exits the
