@@ -171,6 +171,49 @@ def test_collapse_consecutive_repeats():
     assert dictate._collapse_consecutive_repeats("") == ""
 
 
+def test_collapse_phrase_repeats():
+    # The reported Julia cases: a multi-word phrase looping at the tail / mid.
+    assert dictate._collapse_phrase_repeats(
+        "I want to fly in, I want to fly in, I want to fly in, I want to fly in."
+    ) == "I want to fly in"
+    assert dictate._collapse_phrase_repeats(
+        "So we could go back there. So we could go back there. So we could go back there."
+    ) == "So we could go back there."
+    # Smallest fundamental unit wins.
+    assert dictate._collapse_phrase_repeats("the cat the cat the cat") == "the cat"
+    # Below threshold (2 reps) -> unchanged; single-word runs are the other fn's job.
+    assert dictate._collapse_phrase_repeats("I really really like it") == "I really really like it"
+    assert dictate._collapse_phrase_repeats("Hello world this is fine.") == "Hello world this is fine."
+    assert dictate._collapse_phrase_repeats("") == ""
+
+
+def test_detect_output_failure():
+    # Phrase loop (the Julia case) -> detected.
+    assert dictate._detect_output_failure(
+        "blah blah if I'm going to fly literally I want to fly in, "
+        "I want to fly in, I want to fly in, I want to fly in.")
+    # Whole-transcript phantom.
+    assert dictate._detect_output_failure("Thank you.")
+    # Trailing phantom after real content.
+    assert dictate._detect_output_failure("Here is my point. Thanks for watching.")
+    # Leaked special token.
+    assert dictate._detect_output_failure("hello [BLANK_AUDIO] world")
+    # Clean real speech -> no failure detected.
+    assert dictate._detect_output_failure("This is a perfectly normal sentence about cats.") is None
+    assert dictate._detect_output_failure("") is None
+    # Regression: multi-segment text with newlines must NOT trip the
+    # "leaked special token" check (it used to, via a whitespace diff).
+    assert dictate._detect_output_failure(
+        "Okay, I've just tried to use it.\n And although the output pasted fine.") is None
+
+
+def test_hallucination_alert_settings_default_on():
+    # The garbled-text alert toggles exist and default on (the log is always
+    # written regardless; these only gate the immediate heads-up).
+    assert dictate.LIVE_SETTINGS["hallucination_notify"] is True
+    assert dictate.LIVE_SETTINGS["hallucination_sound"] is True
+
+
 def test_is_repetitive_loop():
     assert dictate._is_repetitive_loop("thank you thank you thank you thank you")
     assert dictate._is_repetitive_loop("the the the the the the the the")

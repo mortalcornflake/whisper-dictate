@@ -4,10 +4,11 @@ import subprocess
 
 # Semantic event -> macOS system sound name (in /System/Library/Sounds).
 _SOUNDS = {
-    "start": "Tink",     # recording started (short, non-intrusive)
-    "stop": "Blow",      # recording stopped
-    "done": "Glass",     # transcription pasted / reset complete
-    "warning": "Sosumi", # approaching auto-stop limit
+    "start": "Tink",        # recording started (short, non-intrusive)
+    "stop": "Blow",         # recording stopped
+    "done": "Glass",        # transcription pasted / reset complete
+    "warning": "Sosumi",    # approaching auto-stop limit
+    "hallucination": "Funk",  # garbled-output alert (toggleable via HALLUCINATION_SOUND)
 }
 
 
