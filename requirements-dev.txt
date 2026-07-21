@@ -1,3 +1,4 @@
 # Development/test requirements:
 #   pip install -r requirements.txt -r requirements-dev.txt
 pytest>=8.0
+pyinstaller>=6.0  # build the macOS .app (see MACOS_APP_BUILD.md)
