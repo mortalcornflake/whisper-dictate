@@ -24,8 +24,12 @@ warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL')
 
 from dotenv import load_dotenv
 
-# Load .env file from script directory
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+from app_paths import env_file_path, ensure_env_seeded
+from flagged import append_flagged
+# Load .env from the repo when running from source, or from the per-user
+# app-support dir when running inside a frozen .app bundle (see app_paths).
+ensure_env_seeded()
+load_dotenv(env_file_path())
 
 import numpy as np
 import sounddevice as sd
@@ -191,6 +195,11 @@ LIVE_SETTINGS = {
     # Off by default (saving all your audio is a deliberate choice); the menu bar
     # has a toggle and an "Open recordings folder" item.
     "save_recordings": _env_bool("SAVE_RECORDINGS", False),
+    # Garbled-text (hallucination) alerts. The paste is always raw and always
+    # logged to flagged.md regardless; these only control the immediate heads-up.
+    # Both default on; toggle live from "Garbled-text alerts" in the menu bar.
+    "hallucination_notify": _env_bool("HALLUCINATION_NOTIFY", True),
+    "hallucination_sound": _env_bool("HALLUCINATION_SOUND", True),
 }
 # Where archived recordings go when save_recordings is on. Each recording writes
 # a <timestamp>.wav (16kHz mono, ~2MB/min) + <timestamp>.txt, and appends a row to
@@ -257,6 +266,12 @@ WHISPER_MODEL_PATH = os.path.expanduser(os.environ.get(
 FALLBACK_TO_LOCAL = os.environ.get("FALLBACK_TO_LOCAL", "true").lower() in ("true", "1", "yes")
 WHISPER_SERVER_PORT = 8080  # Port for whisper server
 WHISPER_SERVER_IDLE_TIMEOUT = 1800  # Shutdown server after 30 min idle (seconds)
+# Sampling temperature for the local whisper.cpp backend (server + CLI fallback).
+# Default 0.5: at temp 0.0 (greedy) the turbo model gets stuck in confident
+# phrase loops ("I want to fly in" x4) that lose the real tail of a long
+# dictation; 0.5 breaks the loop and recovers the content with no accuracy cost
+# on clean speech (verified against real recordings — see tools/eval_whisper.py).
+WHISPER_TEMPERATURE = _env_float("WHISPER_TEMPERATURE", 0.5)
 
 # Global server state (lazy initialization)
 _whisper_server_process = None
@@ -684,7 +699,7 @@ def transcribe_local(audio_bytes: bytes) -> str:
             # Send audio to server
             files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
             data = {
-                "temperature": "0.0",
+                "temperature": str(WHISPER_TEMPERATURE),
                 "response_format": "json"
             }
 
@@ -715,7 +730,8 @@ def transcribe_local(audio_bytes: bytes) -> str:
         cmd = [WHISPER_CPP_PATH]
         if WHISPER_MODEL_PATH:
             cmd.extend(["-m", WHISPER_MODEL_PATH])
-        cmd.extend(["-f", temp_path, "--no-timestamps", "--best-of", "5", "--beam-size", "5", "--language", "en"])
+        cmd.extend(["-f", temp_path, "--no-timestamps", "--temperature", str(WHISPER_TEMPERATURE),
+                    "--best-of", "5", "--beam-size", "5", "--language", "en"])
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         return result.stdout.strip()
@@ -793,6 +809,48 @@ def _collapse_consecutive_repeats(text: str) -> str:
             break
         cur = new
     return cur
+
+
+def _collapse_phrase_repeats(text: str, max_unit: int = 6, min_reps: int = 3) -> str:
+    """Collapse runs where a MULTI-WORD phrase (2..max_unit words) repeats
+    ``min_reps``+ times consecutively, keeping one occurrence. Single-word stuck
+    tokens are handled by _collapse_consecutive_repeats; this catches multi-word
+    phrase loops Whisper emits when its decoding stalls on longer recordings
+    (e.g. "I want to fly in, I want to fly in, ..."). Comparison is
+    case/punctuation-insensitive; the smallest repeating unit (fundamental
+    period) wins."""
+    words = text.split()
+    n = len(words)
+    if n < min_reps * 2:
+        return text
+    norm = lambda w: w.strip(".,!?;:'\"-()").lower()
+    norms = [norm(w) for w in words]
+    out = []
+    i = 0
+    while i < n:
+        chosen = None
+        max_len = min(max_unit, (n - i) // min_reps)
+        for ulen in range(2, max_len + 1):  # multi-word phrases only (>=2)
+            unit = norms[i:i + ulen]
+            reps = 1
+            j = i + ulen
+            while j + ulen <= n and norms[j:j + ulen] == unit:
+                reps += 1
+                j += ulen
+            if reps >= min_reps:
+                chosen = (ulen, j)
+                break
+        if chosen:
+            ulen, j = chosen
+            kept = list(words[i:i + ulen])
+            if kept and kept[-1].endswith(","):  # "x, x, x" -> "x"
+                kept[-1] = kept[-1].rstrip(",")
+            out.extend(kept)
+            i = j
+        else:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
 
 
 def _is_repetitive_loop(text: str, max_unique: int = 3, min_words: int = 8) -> bool:
@@ -886,6 +944,73 @@ def archive_recording(audio_bytes: bytes, text: str, when=None):
         return None
 
 
+def _detect_phrase_loops(text, max_unit=6, min_reps=3):
+    """Return [(reps, 'phrase'), ...] for multi-word phrase loops in raw text
+    (Whisper stuck repeating a phrase). Detection only — does not modify."""
+    words = text.split()
+    n = len(words)
+    if n < min_reps * 2:
+        return []
+    norm = lambda w: w.strip(".,!?;:'\"-()").lower()
+    norms = [norm(w) for w in words]
+    hits, i = [], 0
+    while i < n:
+        chosen = None
+        max_len = min(max_unit, (n - i) // min_reps)
+        for ulen in range(2, max_len + 1):
+            unit = norms[i:i + ulen]
+            reps, j = 1, i + ulen
+            while j + ulen <= n and norms[j:j + ulen] == unit:
+                reps += 1
+                j += ulen
+            if reps >= min_reps:
+                chosen = (reps, j, " ".join(words[i:i + ulen]))
+                break
+        if chosen:
+            hits.append((chosen[0], chosen[2]))
+            i = chosen[1]
+        else:
+            i += 1
+    return hits
+
+
+def _detect_single_loops(text, min_reps=4):
+    """[(reps, word)] for single-word runs of min_reps+ (a stuck token)."""
+    rx = re.compile(r"\b(\w+)(?:[,\s.]+\1){%d,}\b" % (min_reps - 1), re.IGNORECASE)
+    out = []
+    for m in rx.finditer(text):
+        reps = 1 + sum(1 for _ in re.finditer(r"[,\s.]+", m.group(0)))
+        out.append((reps, m.group(1)))
+    return out
+
+
+def _detect_output_failure(text):
+    """Return a short reason string if the raw Whisper output looks like a
+    hallucination/loop (so we can alert the user to re-dictate), else None.
+
+    Pure detection — NEVER modifies the text. Per the 'paste raw + alert'
+    policy, the raw output is pasted as-is (a visible loop/phantom is the
+    user's signal that Whisper glitched; collapsing it would hide a
+    content-loss failure). This just decides whether to ping them.
+    Prevention lives upstream via WHISPER_TEMPERATURE."""
+    if not text or not text.strip():
+        return None
+    reasons = []
+    pl = _detect_phrase_loops(text)
+    if pl:
+        reasons.append(f"phrase loop x{pl[0][0]} ('{pl[0][1][:24]}')")
+    sw = _detect_single_loops(text)
+    if sw:
+        reasons.append(f"repeated '{sw[0][1]}' x{sw[0][0]}")
+    if _WHISPER_SPECIAL_TOKENS.search(text):
+        reasons.append("leaked special token")
+    if _is_hallucination(text):
+        reasons.append("phantom phrase")
+    elif _TRAILING_PHANTOM_ALWAYS_RE.search(text):
+        reasons.append("trailing phantom")
+    return "; ".join(reasons) if reasons else None
+
+
 def transcribe_local_fallback(audio_bytes: bytes) -> str:
     """Transcribe with whichever local engine is available — whisper.cpp if it's
     installed (macOS default), otherwise faster-whisper (Windows default). Used as
@@ -930,19 +1055,12 @@ def transcribe(audio_bytes: bytes) -> str:
             notify("Whisper Dictate", f"Transcription failed: {e}")
             return ""
 
-    # Post-process: strip leaked special tokens, collapse stuck-token runs, then
-    # drop known phantom phrases and hallucinated loops. All target Whisper's
-    # silence/noise failure modes; real dictations pass through untouched.
-    result = _clean_transcript(result)
-    result = _collapse_consecutive_repeats(result)
-    result = _strip_trailing_phantom(result)
-    if _is_hallucination(result):
-        log(f"Filtered hallucination: {result.strip()}")
-        return ""
-    if _is_repetitive_loop(result):
-        log(f"Filtered repetitive loop: {result.strip()}")
-        return ""
-
+    # We deliberately do NOT clean loops/phantoms out of the output — pasting
+    # them raw is the user's signal that Whisper glitched (collapsing would
+    # hide a content-loss failure silently, and can't recover the lost content
+    # anyway). Detection + alert happens in _process_audio via
+    # _detect_output_failure; prevention is upstream via WHISPER_TEMPERATURE.
+    # (The _collapse_*/_strip_* helpers remain as utilities for tools/eval_whisper.py.)
     return result
 
 
@@ -1127,12 +1245,23 @@ class DictationListener:
             self._prepare_standby()
             return
         text = transcribe(audio_bytes).strip()
+        # Paste-raw + alert: if the raw output looks like a hallucination/loop,
+        # paste it unchanged (visible = the user's signal it broke) but ping
+        # them so they know to re-dictate even if they've looked away. Also log
+        # it to flagged.md for later review/annotation from the menu bar.
+        failure = _detect_output_failure(text)
         if LIVE_SETTINGS["single_line"]:
             text = collapse_whitespace(text)
-        # Archive the original audio + transcript for every recording (even ones
-        # that transcribed to nothing), before pasting, if enabled.
-        if LIVE_SETTINGS["save_recordings"]:
-            archive_recording(audio_bytes, text)
+        rec_base = (archive_recording(audio_bytes, text)
+                    if LIVE_SETTINGS["save_recordings"] else None)
+        if failure:
+            log(f"⚠️  Possible hallucination ({failure}); pasting raw: {text[:60]!r}")
+            if LIVE_SETTINGS.get("hallucination_notify", True):
+                notify("Whisper Dictate",
+                       f"⚠️ Output looks garbled ({failure}). Pasted as-is — consider re-dictating.")
+            if LIVE_SETTINGS.get("hallucination_sound", True):
+                play_sound("hallucination")
+            append_flagged(failure, text, recording=rec_base)
         if text:
             self.last_transcription = text
             paste_text(text)
