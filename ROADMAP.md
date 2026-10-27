@@ -171,7 +171,14 @@ Neural Engine), with Whisper kept as the default everywhere.
 - Text: in 20 blind side-by-side pairs, Whisper's was preferred every time. Parakeet is more literal (keeps
   stutters, "uh"/"um", "gonna", spells numbers out: "one oh nine") and misses technical words Whisper gets
   (SD card, OpenRAW, eSIM). Its vocabulary boosting made things worse with a long list.
-- Power use: not yet measured (the test machine was plugged in).
+- Power use: not yet measured (the test machine was plugged in), and no published watts-per-transcription
+  comparison of the Neural Engine against the GPU exists for these models (checked Oct 2026: WhisperKit's paper,
+  FluidAudio's docs and powermetrics write-ups only assert or show it for other workloads). Energy is power times
+  time, so a faster Neural Engine run is likely, but not proven, to use less. Measure with
+  `sudo powermetrics --samplers cpu_power,gpu_power,ane_power -i 200` while each engine transcribes the same clips.
+- A likelier battery mode than Parakeet: **Whisper itself on the Neural Engine**, via WhisperKit (Argmax) or
+  whisper.cpp's Core ML encoder: Whisper's text with the Neural Engine's efficiency. WhisperKit's paper reports
+  large-v3-turbo compressed for the Neural Engine within about 1 word-error point of the original.
 
 **Possible future shape:** a backend setting (`DICTATE_BACKEND=parakeet`), and optionally switching by power
 source: Parakeet on battery, Whisper on mains. Before building it: measure energy per dictation on battery for
