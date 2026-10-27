@@ -130,6 +130,36 @@ Define voice shortcuts:
 
 Store in `~/.whisper-dictate/snippets.json`
 
+### Evaluating new speech engines (where to look, how to judge)
+Whisper large-v3-turbo through whisper.cpp stays the default until something beats it on the text people actually
+want, not just on speed. Speech models move fast, so check these every few months or when a notable release lands:
+
+**Where new options show up**
+- Hugging Face Open ASR Leaderboard (`hf-audio/open_asr_leaderboard`): word error and speed across open models
+  (English and multilingual). A first filter only: it scores normalised text, which hides the formatting and
+  vocabulary differences that decide dictation.
+- whisper.cpp releases (github.com/ggml-org/whisper.cpp): new Whisper builds, quantisations, and the optional
+  Core ML encoder (runs Whisper's encoder on the Neural Engine).
+- WhisperKit (github.com/argmaxinc/WhisperKit): Whisper compiled for Core ML / the Neural Engine. The route to
+  Whisper's text with the Neural Engine's efficiency, if that matters.
+- FluidAudio (github.com/FluidInference/FluidAudio) and its Hugging Face org (`FluidInference`): Core ML ports for
+  the Neural Engine. Already includes Parakeet v2 (English), v3, Ultra and Phonon-2 retrains, Canary-1B-v2, a
+  vocabulary booster and a number normaliser (inverse text normalisation).
+- NVIDIA NeMo model cards on Hugging Face (`nvidia/parakeet-*`, `nvidia/canary-*`), and Apple's MLX community
+  ports (`mlx-community`).
+
+**How to judge a candidate (what the Oct 2026 test taught)**
+1. Run it over a set of real dictations from the person who'll use it, not a public benchmark: the 2026 test used
+   302 of the author's own recordings.
+2. Automatic scores need two references from different model families (e.g. a Whisper model and a non-Whisper
+   one); each family scores the other worse, so on their own they can't pick a winner.
+3. The decider is a blind side-by-side: 20 short clips where the two engines differ, sides shuffled, the user
+   picks the closer text. Decide the threshold first (15 of 20 for a one-sided sign test).
+4. Time it like for like (cold call vs cold call, warm vs warm) with the GPU otherwise idle, and report the
+   slowest 5%, not the average.
+5. Check formatting separately (numbers as digits, capitals, punctuation, filler words): normal scoring strips it.
+6. Measure energy per dictation on battery before claiming a battery benefit.
+
 ### Parakeet on the Neural Engine as a battery option (tested Oct 2026, not the default)
 A second Mac-only backend: NVIDIA Parakeet TDT 0.6B v3 through FluidAudio (Core ML, int8 encoder on the Apple
 Neural Engine), with Whisper kept as the default everywhere.
