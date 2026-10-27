@@ -130,6 +130,23 @@ Define voice shortcuts:
 
 Store in `~/.whisper-dictate/snippets.json`
 
+### Parakeet on the Neural Engine as a battery option (tested Oct 2026, not the default)
+A second Mac-only backend: NVIDIA Parakeet TDT 0.6B v3 through FluidAudio (Core ML, int8 encoder on the Apple
+Neural Engine), with Whisper kept as the default everywhere.
+
+**What a test on 302 real dictations found (27 Oct 2026):**
+- Much faster: the slowest 5% of dictations under 30 s took 0.5 s against 1.5 s for the warm Whisper server
+  (large-v3-turbo); 0.8 s against 6.8 s across all lengths. It runs off the GPU, so it doesn't compete with other
+  GPU work.
+- Text: in 20 blind side-by-side pairs, Whisper's was preferred every time. Parakeet is more literal (keeps
+  stutters, "uh"/"um", "gonna", spells numbers out: "one oh nine") and misses technical words Whisper gets
+  (SD card, OpenRAW, eSIM). Its vocabulary boosting made things worse with a long list.
+- Power use: not yet measured (the test machine was plugged in).
+
+**Possible future shape:** a backend setting (`DICTATE_BACKEND=parakeet`), and optionally switching by power
+source: Parakeet on battery, Whisper on mains. Before building it: measure energy per dictation on battery for
+both; add number normalising (FluidAudio ships one) and a filler/stutter filter, then re-check the text blind.
+
 ### Push-to-Talk vs Voice Activity Detection
 Option to auto-detect speech start/stop instead of holding key:
 - Use `webrtcvad` for voice activity detection
